@@ -1,38 +1,185 @@
-.App {
-  text-align: center;
+/* App.css */
+.app-container {
+  display: flex;
+  height: 100vh;
+  font-family: Arial, sans-serif;
+  color: #333;
+  position: relative;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+.sidebar, .right-panel {
+  width: 20%;
+  background: #fff;
+  padding: 1rem;
+  border-right: 1px solid #ccc;
+  box-sizing: border-box;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+.right-panel {
+  border-left: 1px solid #ccc;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 1.2rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+}
+
+.sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sidebar-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #f0f8ff;
+}
+
+.sidebar-item.active {
+  background-color: #1e3a8a;
   color: white;
 }
 
-.App-link {
-  color: #61dafb;
+.delete-button {
+  background: none;
+  color: red;
+  border: none;
+  cursor: pointer;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.main-content {
+  flex: 1;
+  padding: 1rem;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.score-box {
+  background-color: #1e3a8a;
+  color: white;
+  padding: 0.5rem;
+  font-weight: bold;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+.url-input {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.input {
+  padding: 0.5rem;
+  flex: 1;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.button {
+  padding: 0.5rem 1rem;
+  background-color: #1e3a8a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.card {
+  background: black;
+  border-radius: 8px;
+  overflow: hidden;
+  width: 100%;
+  height: 360px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-image {
+  max-height: 100px;
+}
+
+.caption {
+  color: #1e3a8a;
+  font-weight: bold;
+  margin-top: 1rem;
+  font-size: 1.2rem;
+}
+
+.create-playlist {
+  margin-bottom: 1rem;
+  width: 100%;
+}
+
+.playlist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.playlist {
+  padding: 0.5rem;
+  border-radius: 4px;
+  color: white;
+}
+
+.playlist.green {
+  background-color: #28a745;
+}
+
+.playlist.blue {
+  background-color: #007bff;
+}
+
+.difficulty-buttons {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1rem;
+}
+
+.difficulty.easy {
+  background-color: #28a745;
+}
+
+.difficulty.medium {
+  background-color: #ffc107;
+}
+
+.difficulty.hard {
+  background-color: #fd7e14;
+}
+
+.header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background-color: #000;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 1rem;
+  box-sizing: border-box;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.switch {
+  width: 16px;
+  height: 16px;
 }
