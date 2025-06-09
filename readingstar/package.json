@@ -59,9 +59,15 @@
     },
     "files": [
       "build/**/*",
-      "public/electron.js"
+      "public/electron.js",
+      "live_match_api.exe"
     ],
-    "extraFiles": [],
+    "extraFiles": [
+      {
+        "from": "live_match_api.exe",
+        "to": "live_match_api.exe"
+      }
+    ],
     "win": {
       "target": "nsis"
     },
