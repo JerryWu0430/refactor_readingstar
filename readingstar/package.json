@@ -59,12 +59,11 @@
     },
     "files": [
       "build/**/*",
-      "public/electron.js",
-      "live_match_api.exe"
+      "public/electron.js"
     ],
-    "extraFiles": [
+    "extraResources": [
       {
-        "from": "live_match_api.exe",
+        "from": "public/live_match_api.exe",
         "to": "live_match_api.exe"
       }
     ],

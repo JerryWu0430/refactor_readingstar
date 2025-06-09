@@ -1,16 +1,50 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 let apiProcess = null;
 
 function spawnApiProcess() {
   try {
-    // Get the app path - works in both development and production
-    const appPath = app.getAppPath();
-    const exePath = path.join(appPath, 'live_match_api.exe');
+    const isDev = !app.isPackaged;
+    let exePath;
+    
+    if (isDev) {
+      // In development, exe is in public folder (same directory as this file)
+      exePath = path.join(__dirname, 'live_match_api.exe');
+    } else {
+      // In production, exe should be in the app resources directory
+      exePath = path.join(process.resourcesPath, 'live_match_api.exe');
+    }
     
     console.log('Attempting to spawn API process from:', exePath);
+    
+    // Check if file exists before trying to spawn
+    if (!fs.existsSync(exePath)) {
+      console.error('API executable not found at:', exePath);
+      
+      // Try alternative paths as fallback
+      const fallbackPaths = [
+        path.join(__dirname, 'live_match_api.exe'),
+        path.join(app.getAppPath(), 'live_match_api.exe'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'live_match_api.exe')
+      ];
+      
+      for (const fallbackPath of fallbackPaths) {
+        console.log('Trying fallback path:', fallbackPath);
+        if (fs.existsSync(fallbackPath)) {
+          exePath = fallbackPath;
+          console.log('Found exe at fallback path:', exePath);
+          break;
+        }
+      }
+      
+      if (!fs.existsSync(exePath)) {
+        console.error('API executable not found in any location');
+        return;
+      }
+    }
     
     // Spawn the API process
     apiProcess = spawn(exePath, [], {
