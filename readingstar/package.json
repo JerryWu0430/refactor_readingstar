@@ -18,7 +18,8 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "electron": "electron public/electron.js",
-    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && npm run electron\""
+    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && npm run electron\"",
+    "dist": "npm run build && electron-builder"
   },
   "eslintConfig": {
     "extends": [
@@ -41,6 +42,32 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "electron": "^36.4.0",
-    "wait-on": "^8.0.3"
+    "wait-on": "^8.0.3",
+    "electron-builder": "^24.6.0"
+  },
+  "main": "public/electron.js",
+  "homepage": "./",
+  "build": {
+    "appId": "com.readingstar.app",
+    "productName": "ReadingStar",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "public/electron.js",
+      "!node_modules/fsevents/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "extraMetadata": {
+      "main": "build/electron.js"
+    }
   }
 }
