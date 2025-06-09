@@ -1,6 +1,5 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const isDev = !app.isPackaged;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -13,13 +12,16 @@ function createWindow() {
     },
   });
 
+  // Use app.isPackaged instead of electron-is-dev
+  const isDev = !app.isPackaged;
+  
   const startURL = isDev
     ? 'http://localhost:3000'
     : `file://${path.join(__dirname, '../build/index.html')}`;
 
   win.loadURL(startURL);
 
-  // Open DevTools in development
+  // Open DevTools in development only
   if (isDev) {
     win.webContents.openDevTools();
   }
