@@ -27,3 +27,4 @@ dist/
 RefactoringApp.tsx
 node_modules/
 release/
+public/live_match_api.exe
