@@ -671,9 +671,9 @@ export default function App() {
   }
 
   const backgroundImages = {
-    curtain: "/placeholder.svg?height=600&width=800",
-    stage: "/placeholder.svg?height=600&width=800",
-    concert: "/placeholder.svg?height=600&width=800",
+    curtain: "/assets/curtain.jpg",
+    stage: "/assets/stage.jpg",
+    concert: "/assets/concert.jpg",
   }
 
   const styles = {
@@ -1837,7 +1837,7 @@ export default function App() {
                 />
               ) : (
                 <img
-                  src={backgroundImages[lyricsSettings.background] || "/placeholder.svg"}
+                  src={backgroundImages[lyricsSettings.background]}
                   alt="Background"
                   style={styles.backgroundImage}
                 />
