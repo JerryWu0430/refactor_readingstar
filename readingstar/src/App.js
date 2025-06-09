@@ -222,6 +222,14 @@ export default function App() {
     setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`)
     getSongTitle(url)
     setVideoPlaying(true)
+    
+    // Reset state for new video
+    setLyrics([])
+    setCurrentLyric("")
+    setCurrentTime(0)
+    setVideoUnavailable(false)
+    previousLyricRef.current = ""
+    
     fetchYoutubeSubtitles(url)
     setFinalScore(-1)
 
@@ -331,13 +339,182 @@ export default function App() {
     }
   }
 
+  const fetchYoutubeSubtitles = async (url) => {
+    const maxRetries = 8;
+    const baseDelay = 1000; // 1 second base delay
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        console.log(`[Renderer] Subtitle fetch attempt ${attempt + 1}/${maxRetries}`);
+        
+        // Use Electron API to bypass CORS - but with simple approach like React Native
+        const html = await window.electronAPI.fetchYouTubeHTML(url);
+        console.log("[Renderer] Received HTML, length:", html.length);
+        
+        const timedTextIndex = html.indexOf("timedtext");
+
+        if (timedTextIndex !== -1) {
+          const startIndex = html.lastIndexOf('"', timedTextIndex) + 1;
+          const endIndex = html.indexOf('"', timedTextIndex);
+          let subtitleUrl = html.substring(startIndex, endIndex);
+
+          subtitleUrl = subtitleUrl.replace(/\\u0026/g, "&");
+          console.log("[Renderer] Decoded subtitle URL:", subtitleUrl);
+          
+          // Use the same language handling as the working React Native app
+          const langIndex = subtitleUrl.indexOf('&lang=');
+          if (langIndex === -1) {
+            // No language parameter, add it
+            subtitleUrl += '&lang=en';
+            console.log("[Renderer] Added English language parameter:", subtitleUrl);
+          } else {
+            // Check if not already English
+            const langStart = langIndex + 6;
+            const langEnd = subtitleUrl.indexOf('&', langStart);
+            const currentLang = langEnd === -1 
+              ? subtitleUrl.substring(langStart)
+              : subtitleUrl.substring(langStart, langEnd);
+              
+            if (currentLang !== 'en') {
+              const prefix = subtitleUrl.substring(0, langStart);
+              const suffix = langEnd === -1 
+                ? '' 
+                : subtitleUrl.substring(langEnd);
+              subtitleUrl = prefix + 'en' + suffix;
+              console.log("[Renderer] Changed language to English:", subtitleUrl);
+            } else {
+              console.log("[Renderer] Already English, using URL as-is");
+            }
+          }
+          
+          try {
+            console.log("[Renderer] Fetching subtitles...");
+            // Use Electron API for subtitle fetch - simple like React Native
+            const subtitleText = await window.electronAPI.fetchSubtitleXML(subtitleUrl);
+
+            console.log("[Renderer] Successfully fetched subtitles, response length:", subtitleText.length);
+            
+            // Check if we got valid XML content
+            if (!subtitleText || subtitleText.length === 0) {
+              console.warn(`[Renderer] Empty subtitle response on attempt ${attempt + 1}`);
+              throw new Error("Empty subtitle response");
+            }
+            
+            console.log("[Renderer] Subtitle XML first 200 chars:", subtitleText.substring(0, 200));
+
+            // Parse XML using DOMParser (keeping existing parsing logic)
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(subtitleText, "text/xml");
+            
+            // Check for parsing errors
+            const parseError = xmlDoc.getElementsByTagName("parsererror");
+            if (parseError.length > 0) {
+              console.error("[Renderer] XML parsing error:", parseError[0].textContent);
+              console.error("[Renderer] Raw subtitle text that failed to parse:", subtitleText);
+              throw new Error("XML parsing failed");
+            }
+            
+            const textElements = xmlDoc.getElementsByTagName("text");
+            console.log("[Renderer] Found text elements:", textElements.length);
+
+            if (textElements.length === 0) {
+              console.warn(`[Renderer] No text elements found on attempt ${attempt + 1}`);
+              throw new Error("No text elements found in subtitle XML");
+            }
+
+            const lyricsArray = Array.from(textElements).map((item, index) => {
+              const lyric = item.textContent
+                ?.replace(/&amp;/g, "&")
+                .replace(/&lt;/g, "<")
+                .replace(/&gt;/g, ">")
+                .replace(/&#39;/g, "'")
+                .replace(/&quot;/g, '"') || "";
+              const time = Number.parseFloat(item.getAttribute("start") || "0");
+              
+              if (index < 5) { // Log first 5 entries for debugging
+                console.log(`[Renderer] Lyric ${index}:`, { lyric, time });
+              }
+              
+              return { lyric, time };
+            });
+            
+            console.log("[Renderer] Processed lyrics array, length:", lyricsArray.length);
+
+            setLyrics(lyricsArray);
+            setVideoUnavailable(false); // Reset unavailable flag on success
+            
+            if (lyricsArray.length > 0) {
+              try {
+                await makeApiCall("http://localhost:8000/full_lyric", {
+                  method: "POST",
+                  body: JSON.stringify({ lyric: lyricsArray }),
+                });
+              } catch (error) {
+                console.log("Full lyric endpoint not available");
+              }
+            }
+            
+            // If we reach here, the fetch was successful, so return
+            console.log(`[Renderer] Successfully fetched subtitles on attempt ${attempt + 1}`);
+            return;
+
+          } catch (error) {
+            console.warn(`[Renderer] Subtitle fetch failed on attempt ${attempt + 1}:`, error.message);
+            
+            // If this was the last attempt, set video unavailable
+            if (attempt === maxRetries - 1) {
+              console.error("[Renderer] All subtitle fetch attempts failed");
+              setVideoUnavailable(true);
+              return;
+            }
+            
+            // Calculate delay with exponential backoff
+            const delay = baseDelay * Math.pow(2, attempt);
+            console.log(`[Renderer] Retrying in ${delay}ms...`);
+            
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue; // Try again
+          }
+        } else {
+          console.warn(`[Renderer] No timedtext found in HTML on attempt ${attempt + 1}`);
+          
+          if (attempt === maxRetries - 1) {
+            console.log("[Renderer] HTML snippet around potential subtitle area:", 
+              html.substring(Math.max(0, html.indexOf("captionTracks") - 100), 
+              html.indexOf("captionTracks") + 500));
+            setVideoUnavailable(true);
+            return;
+          }
+          
+          // Wait before retrying
+          const delay = baseDelay * Math.pow(2, attempt);
+          console.log(`[Renderer] Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      } catch (error) {
+        console.error(`[Renderer] Error in fetchYoutubeSubtitles attempt ${attempt + 1}:`, error);
+        
+        if (attempt === maxRetries - 1) {
+          console.error("[Renderer] All attempts failed, error stack:", error.stack);
+          setVideoUnavailable(true);
+          return;
+        }
+        
+        // Wait before retrying
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.log(`[Renderer] Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  };
+
   const getSongTitle = async (url) => {
     try {
       let title = findFromPlaylist(url).name ?? ""
       if (!title) {
-        // Extract title from YouTube page
-        const response = await fetch(url)
-        const html = await response.text()
+        // Use Electron API to bypass CORS
+        const html = await window.electronAPI.fetchYouTubeHTML(url);
         const titleIndex = html.indexOf("<title>")
         const titleEndIndex = html.indexOf("</title>")
         title = html.substring(titleIndex + 7, titleEndIndex)
@@ -387,69 +564,6 @@ export default function App() {
     setDifficulty(difficulty)
   }
 
-  const fetchYoutubeSubtitles = async (url) => {
-    try {
-      const response = await fetch(url)
-      const html = await response.text()
-      const timedTextIndex = html.indexOf("timedtext")
-      if (timedTextIndex !== -1) {
-        const startIndex = html.lastIndexOf('"', timedTextIndex) + 1
-        const endIndex = html.indexOf('"', timedTextIndex)
-        let subtitleUrl = html.substring(startIndex, endIndex)
-        subtitleUrl = subtitleUrl.replace(/\\u0026/g, "&")
-
-        const langIndex = subtitleUrl.indexOf("&lang=")
-        if (langIndex === -1) {
-          subtitleUrl += "&lang=en"
-        } else {
-          const langStart = langIndex + 6
-          const langEnd = subtitleUrl.indexOf("&", langStart)
-          const currentLang =
-            langEnd === -1 ? subtitleUrl.substring(langStart) : subtitleUrl.substring(langStart, langEnd)
-
-          if (currentLang !== "en") {
-            const prefix = subtitleUrl.substring(0, langStart)
-            const suffix = langEnd === -1 ? "" : subtitleUrl.substring(langEnd)
-            subtitleUrl = prefix + "en" + suffix
-          }
-        }
-
-        const subtitleResponse = await fetch(subtitleUrl)
-        const subtitleText = await subtitleResponse.text()
-
-        // Parse XML using DOMParser
-        const parser = new DOMParser()
-        const xmlDoc = parser.parseFromString(subtitleText, "text/xml")
-        const textElements = xmlDoc.getElementsByTagName("text")
-
-        const lyricsArray = Array.from(textElements).map((item) => ({
-          lyric:
-            item.textContent
-              ?.replace(/&amp;/g, "&")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&#39;/g, "'")
-              .replace(/&quot;/g, '"') || "",
-          time: Number.parseFloat(item.getAttribute("start") || "0"),
-        }))
-
-        setLyrics(lyricsArray)
-        if (lyricsArray.length > 0) {
-          try {
-            await makeApiCall("http://localhost:8000/full_lyric", {
-              method: "POST",
-              body: JSON.stringify({ lyric: lyricsArray }),
-            })
-          } catch (error) {
-            console.log("Full lyric endpoint not available")
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching subtitles:", error)
-    }
-  }
-
   // Animation effect for lyrics
   useEffect(() => {
     if (currentLyric) {
@@ -483,12 +597,20 @@ export default function App() {
   }, [currentLyric, lyrics])
 
   useEffect(() => {
-    if (currentTime) {
+    if (currentTime > 0 && lyrics.length > 0) {
       const elapsedTime = currentTime
 
-      // Find the current lyric based on elapsed time
-      const currentLyricObj = lyrics.reduce((prev, curr) => (curr.time <= elapsedTime ? curr : prev), { lyric: "" })
-      const currentLyricText = currentLyricObj.lyric
+      // Find the current lyric based on elapsed time with proper safety checks
+      const currentLyricObj = lyrics.reduce((prev, curr) => {
+        // Safety check: ensure both prev and curr exist and have time property
+        if (!prev || !curr || typeof curr.time !== 'number') {
+          return prev || { lyric: "", time: 0 }
+        }
+        return curr.time <= elapsedTime ? curr : prev
+      }, { lyric: "", time: 0 })
+
+      // Safety check: ensure currentLyricObj exists and has lyric property
+      const currentLyricText = currentLyricObj?.lyric || ""
 
       // Only update and call startMatching if the lyric has changed
       if (currentLyricText !== previousLyricRef.current) {
@@ -1996,6 +2118,7 @@ export default function App() {
                         color: difficulty === label ? "#fff" : color,
                       }}
                     >
+                     
                       {label}
                     </span>
                   </button>

@@ -1,9 +1,95 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
 let apiProcess = null;
+
+// Store cookies and session data between requests
+let sessionCookies = '';
+
+ipcMain.handle('fetch-youtube-html', async (event, url) => {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none'
+    };
+
+    const response = await fetch(url, { headers });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    // Store cookies for subsequent requests
+    const setCookie = response.headers.get('set-cookie');
+    if (setCookie) {
+      sessionCookies = setCookie;
+    }
+    
+    return await response.text();
+  } catch (error) {
+    console.error('Error fetching YouTube HTML:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('fetch-subtitle-xml', async (event, url) => {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    // Use IDENTICAL headers to the HTML request + stored cookies
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,*/*;q=0.5',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Referer': 'https://www.youtube.com/',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin'
+    };
+
+    // Add stored cookies if available
+    if (sessionCookies) {
+      headers['Cookie'] = sessionCookies;
+    }
+
+    const response = await fetch(url, { 
+      headers,
+      timeout: 15000 
+    });
+    
+    console.log('[Main] Subtitle response status:', response.status);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const text = await response.text();
+    console.log('[Main] Subtitle response length:', text.length);
+    
+    if (text.length === 0) {
+      throw new Error('Empty response - signature may be invalid');
+    }
+    
+    return text;
+  } catch (error) {
+    console.error('Error fetching subtitle XML:', error);
+    throw error;
+  }
+});
+
 
 function spawnApiProcess() {
   try {
@@ -103,7 +189,8 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       enableRemoteModule: false,
-      nodeIntegration: false
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js')
     },
   });
 
