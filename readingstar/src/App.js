@@ -549,9 +549,9 @@ export default function App() {
   }
 
   const backgroundImages = {
-    curtain: "./assets/curtain.jpg",
-    stage: "./assets/stage.jpg",
-    concert: "./assets/concert.jpg",
+    curtain: "/assets/curtain.jpg",
+    stage: "/assets/stage.jpg",
+    concert: "/assets/concert.jpg",
   }
 
   const styles = {
@@ -1599,9 +1599,11 @@ export default function App() {
                         <img
                           src={bg.image || "/placeholder.svg"}
                           alt={bg.label}
-                          style={styles.backgroundImage}
-                          onError={(e) => {
-                            e.target.src = "/placeholder.svg?height=600&width=800"
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            position: "absolute",
                           }}
                         />
                       )}
@@ -1696,7 +1698,7 @@ export default function App() {
         >
           {/* Focus Mode Background */}
           {isFocusMode && (
-            <div style={styles.fullscreenBackground}>
+            <div style={styles.fullscreen}>
               {lyricsSettings.background === "black" ? (
                 <div
                   style={{
@@ -1713,12 +1715,9 @@ export default function App() {
                 />
               ) : (
                 <img
-                  src={backgroundImages[lyricsSettings.background] || "/placeholder.svg"}
+                  src={backgroundImages[lyricsSettings.background]}
                   alt="Background"
                   style={styles.backgroundImage}
-                  onError={(e) => {
-                    e.target.src = "/placeholder.svg?height=600&width=800"
-                  }}
                 />
               )}
             </div>
