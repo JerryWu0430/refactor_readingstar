@@ -21,3 +21,10 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+.vs/
+dist/
+RefactoringApp.tsx
+node_modules/
+release/
+public/live_match_api.exe
