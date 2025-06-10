@@ -8,7 +8,7 @@ const MenuIcon = () => (
     <path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z" />
   </svg>
 )
-
+ 
 const StarIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
     <path
@@ -129,7 +129,99 @@ const makeApiCall = async (url, options = {}) => {
   }
 }
 
+// Add LoadingScreen component
+const LoadingScreen = ({ attempts, maxAttempts }) => (
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "center",
+      alignItems: "center",
+      height: "100vh",
+      backgroundColor: "#f8f9fa",
+      fontFamily: "system-ui, -apple-system, sans-serif",
+    }}
+  >
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        marginBottom: "24px",
+      }}
+    >
+      <h1
+        style={{
+          fontSize: "48px",
+          fontWeight: "bold",
+          color: "#333",
+          marginRight: "16px",
+        }}
+      >
+        ReadingStar
+      </h1>
+      <StarIcon />
+    </div>
+
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "16px",
+      }}
+    >
+      <div
+        style={{
+          width: "40px",
+          height: "40px",
+          border: "4px solid #e0e0e0",
+          borderTop: "4px solid #0078d4",
+          borderRadius: "50%",
+          animation: "spin 1s linear infinite",
+        }}
+      />
+      <span
+        style={{
+          fontSize: "24px",
+          color: "#666",
+        }}
+      >
+        {attempts >= maxAttempts ? "Starting with offline mode..." : `Loading... (${attempts}/${maxAttempts})`}
+      </span>
+    </div>
+
+    <p
+      style={{
+        fontSize: "16px",
+        color: "#888",
+        marginTop: "16px",
+        textAlign: "center",
+        maxWidth: "400px",
+      }}
+    >
+      {attempts >= maxAttempts 
+        ? "The speech recognition engine couldn't be reached, but you can still use the app with basic features."
+        : "Starting up the speech recognition engine. This may take a moment."}
+    </p>
+
+    <style jsx>{`
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    `}</style>
+  </div>
+)
+
 export default function App() {
+  // Add API loading state
+  const [isApiReady, setIsApiReady] = useState(false)
+  const [apiCheckAttempts, setApiCheckAttempts] = useState(0)
+  const [apiAvailable, setApiAvailable] = useState(true) // Track if API is actually available
+
   const [score, setScore] = useState(0)
   const [finalScore, setFinalScore] = useState(-1)
   const [selectedSong, setSelectedSong] = useState("")
@@ -170,6 +262,48 @@ export default function App() {
   const previousLyricRef = useRef("")
   const animationRef = useRef(null)
   const timeIntervalRef = useRef(null)
+
+  // Add function to check API readiness
+  const checkApiReadiness = async () => {
+    const maxAttempts = 50 // 50 seconds maximum wait time
+    const checkInterval = 1000 // Check every 1 second
+
+    const attemptApiCall = async (attempt) => {
+      try {
+        console.log(`[API Check] Attempt ${attempt + 1}/${maxAttempts}`)
+        setApiCheckAttempts(attempt + 1)
+
+        const playlistData = await makeApiCall("http://localhost:8000/playlists", {
+          method: "GET",
+        })
+
+        // If we get a valid response with playlists array, API is ready
+        if (playlistData && playlistData.playlists && Array.isArray(playlistData.playlists)) {
+          console.log("[API Check] API is ready!")
+          setApiAvailable(true)
+          setIsApiReady(true)
+          return true
+        } else {
+          throw new Error("Invalid playlist response format")
+        }
+      } catch (error) {
+        console.log(`[API Check] Attempt ${attempt + 1} failed:`, error.message)
+
+        if (attempt < maxAttempts - 1) {
+          // Wait before next attempt
+          await new Promise((resolve) => setTimeout(resolve, checkInterval))
+          return attemptApiCall(attempt + 1)
+        } else {
+          console.error("[API Check] Max attempts reached, proceeding with fallback data")
+          setApiAvailable(false) // Mark API as unavailable
+          setIsApiReady(true) // Still proceed to show the app
+          return false
+        }
+      }
+    }
+
+    return attemptApiCall(0)
+  }
 
   const fetchPlaylists = async () => {
     setPlaylistLoaded(false)
@@ -222,14 +356,14 @@ export default function App() {
     setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`)
     getSongTitle(url)
     setVideoPlaying(true)
-    
+
     // Reset state for new video
     setLyrics([])
     setCurrentLyric("")
     setCurrentTime(0)
     setVideoUnavailable(false)
     previousLyricRef.current = ""
-    
+
     fetchYoutubeSubtitles(url)
     setFinalScore(-1)
 
@@ -340,86 +474,85 @@ export default function App() {
   }
 
   const fetchYoutubeSubtitles = async (url) => {
-    const maxRetries = 8;
-    const baseDelay = 1000; // 1 second base delay
-    
+    const maxRetries = 8
+    const baseDelay = 1000 // 1 second base delay
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        console.log(`[Renderer] Subtitle fetch attempt ${attempt + 1}/${maxRetries}`);
-        
+        console.log(`[Renderer] Subtitle fetch attempt ${attempt + 1}/${maxRetries}`)
+
         // Use Electron API to bypass CORS - but with simple approach like React Native
-        const html = await window.electronAPI.fetchYouTubeHTML(url);
-        console.log("[Renderer] Received HTML, length:", html.length);
-        
-        const timedTextIndex = html.indexOf("timedtext");
+        const html = await window.electronAPI.fetchYouTubeHTML(url)
+        console.log("[Renderer] Received HTML, length:", html.length)
+
+        const timedTextIndex = html.indexOf("timedtext")
 
         if (timedTextIndex !== -1) {
-          const startIndex = html.lastIndexOf('"', timedTextIndex) + 1;
-          const endIndex = html.indexOf('"', timedTextIndex);
-          let subtitleUrl = html.substring(startIndex, endIndex);
+          const startIndex = html.lastIndexOf('"', timedTextIndex) + 1
+          const endIndex = html.indexOf('"', timedTextIndex)
+          let subtitleUrl = html.substring(startIndex, endIndex)
 
-          subtitleUrl = subtitleUrl.replace(/\\u0026/g, "&");
-          console.log("[Renderer] Decoded subtitle URL:", subtitleUrl);
-          
+          subtitleUrl = subtitleUrl.replace(/\\u0026/g, "&")
+          console.log("[Renderer] Decoded subtitle URL:", subtitleUrl)
+
           // Use the same language handling as the working React Native app
-          const langIndex = subtitleUrl.indexOf('&lang=');
+          const langIndex = subtitleUrl.indexOf("&lang=")
           if (langIndex === -1) {
             // No language parameter, add it
-            subtitleUrl += '&lang=en';
-            console.log("[Renderer] Added English language parameter:", subtitleUrl);
+            subtitleUrl += "&lang=en"
+            console.log("[Renderer] Added English language parameter:", subtitleUrl)
           } else {
             // Check if not already English
-            const langStart = langIndex + 6;
-            const langEnd = subtitleUrl.indexOf('&', langStart);
-            const currentLang = langEnd === -1 
-              ? subtitleUrl.substring(langStart)
-              : subtitleUrl.substring(langStart, langEnd);
-              
-            if (currentLang !== 'en') {
-              const prefix = subtitleUrl.substring(0, langStart);
-              const suffix = langEnd === -1 
-                ? '' 
-                : subtitleUrl.substring(langEnd);
-              subtitleUrl = prefix + 'en' + suffix;
-              console.log("[Renderer] Changed language to English:", subtitleUrl);
+            const langStart = langIndex + 6
+            const langEnd = subtitleUrl.indexOf("&", langStart)
+            const currentLang =
+              langEnd === -1
+                ? subtitleUrl.substring(langStart)
+                : subtitleUrl.substring(langStart, langEnd)
+
+            if (currentLang !== "en") {
+              const prefix = subtitleUrl.substring(0, langStart)
+              const suffix = langEnd === -1 ? "" : subtitleUrl.substring(langEnd)
+              subtitleUrl = prefix + "en" + suffix
+              console.log("[Renderer] Changed language to English:", subtitleUrl)
             } else {
-              console.log("[Renderer] Already English, using URL as-is");
+              console.log("[Renderer] Already English, using URL as-is")
             }
           }
-          
-          try {
-            console.log("[Renderer] Fetching subtitles...");
-            // Use Electron API for subtitle fetch - simple like React Native
-            const subtitleText = await window.electronAPI.fetchSubtitleXML(subtitleUrl);
 
-            console.log("[Renderer] Successfully fetched subtitles, response length:", subtitleText.length);
-            
+          try {
+            console.log("[Renderer] Fetching subtitles...")
+            // Use Electron API for subtitle fetch - simple like React Native
+            const subtitleText = await window.electronAPI.fetchSubtitleXML(subtitleUrl)
+
+            console.log("[Renderer] Successfully fetched subtitles, response length:", subtitleText.length)
+
             // Check if we got valid XML content
             if (!subtitleText || subtitleText.length === 0) {
-              console.warn(`[Renderer] Empty subtitle response on attempt ${attempt + 1}`);
-              throw new Error("Empty subtitle response");
+              console.warn(`[Renderer] Empty subtitle response on attempt ${attempt + 1}`)
+              throw new Error("Empty subtitle response")
             }
-            
-            console.log("[Renderer] Subtitle XML first 200 chars:", subtitleText.substring(0, 200));
+
+            console.log("[Renderer] Subtitle XML first 200 chars:", subtitleText.substring(0, 200))
 
             // Parse XML using DOMParser (keeping existing parsing logic)
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(subtitleText, "text/xml");
-            
+            const parser = new DOMParser()
+            const xmlDoc = parser.parseFromString(subtitleText, "text/xml")
+
             // Check for parsing errors
-            const parseError = xmlDoc.getElementsByTagName("parsererror");
+            const parseError = xmlDoc.getElementsByTagName("parsererror")
             if (parseError.length > 0) {
-              console.error("[Renderer] XML parsing error:", parseError[0].textContent);
-              console.error("[Renderer] Raw subtitle text that failed to parse:", subtitleText);
-              throw new Error("XML parsing failed");
+              console.error("[Renderer] XML parsing error:", parseError[0].textContent)
+              console.error("[Renderer] Raw subtitle text that failed to parse:", subtitleText)
+              throw new Error("XML parsing failed")
             }
-            
-            const textElements = xmlDoc.getElementsByTagName("text");
-            console.log("[Renderer] Found text elements:", textElements.length);
+
+            const textElements = xmlDoc.getElementsByTagName("text")
+            console.log("[Renderer] Found text elements:", textElements.length)
 
             if (textElements.length === 0) {
-              console.warn(`[Renderer] No text elements found on attempt ${attempt + 1}`);
-              throw new Error("No text elements found in subtitle XML");
+              console.warn(`[Renderer] No text elements found on attempt ${attempt + 1}`)
+              throw new Error("No text elements found in subtitle XML")
             }
 
             const lyricsArray = Array.from(textElements).map((item, index) => {
@@ -428,93 +561,97 @@ export default function App() {
                 .replace(/&lt;/g, "<")
                 .replace(/&gt;/g, ">")
                 .replace(/&#39;/g, "'")
-                .replace(/&quot;/g, '"') || "";
-              const time = Number.parseFloat(item.getAttribute("start") || "0");
-              
-              if (index < 5) { // Log first 5 entries for debugging
-                console.log(`[Renderer] Lyric ${index}:`, { lyric, time });
-              }
-              
-              return { lyric, time };
-            });
-            
-            console.log("[Renderer] Processed lyrics array, length:", lyricsArray.length);
+                .replace(/&quot;/g, '"') || ""
+              const time = Number.parseFloat(item.getAttribute("start") || "0")
 
-            setLyrics(lyricsArray);
-            setVideoUnavailable(false); // Reset unavailable flag on success
-            
+              if (index < 5) {
+                // Log first 5 entries for debugging
+                console.log(`[Renderer] Lyric ${index}:`, { lyric, time })
+              }
+
+              return { lyric, time }
+            })
+
+            console.log("[Renderer] Processed lyrics array, length:", lyricsArray.length)
+
+            setLyrics(lyricsArray)
+            setVideoUnavailable(false) // Reset unavailable flag on success
+
             if (lyricsArray.length > 0) {
               try {
                 await makeApiCall("http://localhost:8000/full_lyric", {
                   method: "POST",
                   body: JSON.stringify({ lyric: lyricsArray }),
-                });
+                })
               } catch (error) {
-                console.log("Full lyric endpoint not available");
+                console.log("Full lyric endpoint not available")
               }
             }
-            
-            // If we reach here, the fetch was successful, so return
-            console.log(`[Renderer] Successfully fetched subtitles on attempt ${attempt + 1}`);
-            return;
 
+            // If we reach here, the fetch was successful, so return
+            console.log(`[Renderer] Successfully fetched subtitles on attempt ${attempt + 1}`)
+            return
           } catch (error) {
-            console.warn(`[Renderer] Subtitle fetch failed on attempt ${attempt + 1}:`, error.message);
-            
+            console.warn(`[Renderer] Subtitle fetch failed on attempt ${attempt + 1}:`, error.message)
+
             // If this was the last attempt, set video unavailable
             if (attempt === maxRetries - 1) {
-              console.error("[Renderer] All subtitle fetch attempts failed");
-              setVideoUnavailable(true);
-              return;
+              console.error("[Renderer] All subtitle fetch attempts failed")
+              setVideoUnavailable(true)
+              return
             }
-            
+
             // Calculate delay with exponential backoff
-            const delay = baseDelay * Math.pow(2, attempt);
-            console.log(`[Renderer] Retrying in ${delay}ms...`);
-            
+            const delay = baseDelay * Math.pow(2, attempt)
+            console.log(`[Renderer] Retrying in ${delay}ms...`)
+
             // Wait before retrying
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue; // Try again
+            await new Promise((resolve) => setTimeout(resolve, delay))
+            continue // Try again
           }
         } else {
-          console.warn(`[Renderer] No timedtext found in HTML on attempt ${attempt + 1}`);
-          
+          console.warn(`[Renderer] No timedtext found in HTML on attempt ${attempt + 1}`)
+
           if (attempt === maxRetries - 1) {
-            console.log("[Renderer] HTML snippet around potential subtitle area:", 
-              html.substring(Math.max(0, html.indexOf("captionTracks") - 100), 
-              html.indexOf("captionTracks") + 500));
-            setVideoUnavailable(true);
-            return;
+            console.log(
+              "[Renderer] HTML snippet around potential subtitle area:",
+              html.substring(
+                Math.max(0, html.indexOf("captionTracks") - 100),
+                html.indexOf("captionTracks") + 500
+              )
+            )
+            setVideoUnavailable(true)
+            return
           }
-          
+
           // Wait before retrying
-          const delay = baseDelay * Math.pow(2, attempt);
-          console.log(`[Renderer] Retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          const delay = baseDelay * Math.pow(2, attempt)
+          console.log(`[Renderer] Retrying in ${delay}ms...`)
+          await new Promise((resolve) => setTimeout(resolve, delay))
         }
       } catch (error) {
-        console.error(`[Renderer] Error in fetchYoutubeSubtitles attempt ${attempt + 1}:`, error);
-        
+        console.error(`[Renderer] Error in fetchYoutubeSubtitles attempt ${attempt + 1}:`, error)
+
         if (attempt === maxRetries - 1) {
-          console.error("[Renderer] All attempts failed, error stack:", error.stack);
-          setVideoUnavailable(true);
-          return;
+          console.error("[Renderer] All attempts failed, error stack:", error.stack)
+          setVideoUnavailable(true)
+          return
         }
-        
+
         // Wait before retrying
-        const delay = baseDelay * Math.pow(2, attempt);
-        console.log(`[Renderer] Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const delay = baseDelay * Math.pow(2, attempt)
+        console.log(`[Renderer] Retrying in ${delay}ms...`)
+        await new Promise((resolve) => setTimeout(resolve, delay))
       }
     }
-  };
+  }
 
   const getSongTitle = async (url) => {
     try {
       let title = findFromPlaylist(url).name ?? ""
       if (!title) {
         // Use Electron API to bypass CORS
-        const html = await window.electronAPI.fetchYouTubeHTML(url);
+        const html = await window.electronAPI.fetchYouTubeHTML(url)
         const titleIndex = html.indexOf("<title>")
         const titleEndIndex = html.indexOf("</title>")
         title = html.substring(titleIndex + 7, titleEndIndex)
@@ -603,7 +740,7 @@ export default function App() {
       // Find the current lyric based on elapsed time with proper safety checks
       const currentLyricObj = lyrics.reduce((prev, curr) => {
         // Safety check: ensure both prev and curr exist and have time property
-        if (!prev || !curr || typeof curr.time !== 'number') {
+        if (!prev || !curr || typeof curr.time !== "number") {
           return prev || { lyric: "", time: 0 }
         }
         return curr.time <= elapsedTime ? curr : prev
@@ -622,24 +759,35 @@ export default function App() {
     }
   }, [currentTime, lyrics])
 
+  // Modified useEffect to check API readiness first
   useEffect(() => {
-    fetchPlaylists()
+    const initializeApp = async () => {
+      console.log("[App] Starting API readiness check...")
+      await checkApiReadiness()
+      console.log("[App] API check completed, fetching playlists...")
+      fetchPlaylists()
+    }
+
+    initializeApp()
   }, [])
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (document.hidden) {
         // Clear time interval when app goes to background
         if (timeIntervalRef.current) {
           clearInterval(timeIntervalRef.current)
         }
 
-        try {
-          makeApiCall("http://localhost:8000/close_microphone", {
-            method: "GET",
-          })
-        } catch (error) {
-          console.log("Close microphone endpoint not available")
+        // Only try to close microphone if API is available
+        if (apiAvailable) {
+          try {
+            await makeApiCall("http://localhost:8000/close_microphone", {
+              method: "GET",
+            })
+          } catch (error) {
+            console.log("Close microphone endpoint not available")
+          }
         }
       }
     }
@@ -655,7 +803,7 @@ export default function App() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [])
+  }, [apiAvailable]) // Add apiAvailable as dependency
 
   const removeBracketedText = (lyric) => {
     if (lyric.includes("[") && lyric.includes("]")) {
@@ -1146,6 +1294,11 @@ export default function App() {
       display: "flex",
       marginRight: "20px",
     },
+  }
+
+  // Show loading screen if API is not ready
+  if (!isApiReady) {
+    return <LoadingScreen attempts={apiCheckAttempts} maxAttempts={50} />
   }
 
   return (
@@ -1820,7 +1973,7 @@ export default function App() {
         >
           {/* Focus Mode Background */}
           {isFocusMode && (
-            <div style={styles.fullscreen}>
+            <div style={styles.fullscreenBackground}>
               {lyricsSettings.background === "black" ? (
                 <div
                   style={{
@@ -2119,7 +2272,6 @@ export default function App() {
                         color: difficulty === label ? "#fff" : color,
                       }}
                     >
-                     
                       {label}
                     </span>
                   </button>
