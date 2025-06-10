@@ -265,7 +265,7 @@ export default function App() {
 
   // Add function to check API readiness
   const checkApiReadiness = async () => {
-    const maxAttempts = 50 // 50 seconds maximum wait time
+    const maxAttempts = 30 // 30 seconds maximum wait time
     const checkInterval = 1000 // Check every 1 second
 
     const attemptApiCall = async (attempt) => {
@@ -772,22 +772,19 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const handleVisibilityChange = async () => {
+    const handleVisibilityChange = () => {
       if (document.hidden) {
         // Clear time interval when app goes to background
         if (timeIntervalRef.current) {
           clearInterval(timeIntervalRef.current)
         }
 
-        // Only try to close microphone if API is available
-        if (apiAvailable) {
-          try {
-            await makeApiCall("http://localhost:8000/close_microphone", {
-              method: "GET",
-            })
-          } catch (error) {
-            console.log("Close microphone endpoint not available")
-          }
+        try {
+          makeApiCall("http://localhost:8000/close_microphone", {
+            method: "GET",
+          })
+        } catch (error) {
+          console.log("Close microphone endpoint not available")
         }
       }
     }
@@ -803,7 +800,7 @@ export default function App() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [apiAvailable]) // Add apiAvailable as dependency
+  }, [])
 
   const removeBracketedText = (lyric) => {
     if (lyric.includes("[") && lyric.includes("]")) {
@@ -1298,7 +1295,7 @@ export default function App() {
 
   // Show loading screen if API is not ready
   if (!isApiReady) {
-    return <LoadingScreen attempts={apiCheckAttempts} maxAttempts={50} />
+    return <LoadingScreen attempts={apiCheckAttempts} maxAttempts={30} />
   }
 
   return (
@@ -2054,42 +2051,57 @@ export default function App() {
             >
               {youtubeUrl ? (
                 videoPlaying ? (
-                  <iframe
-                    src={embedUrl}
-                    style={styles.iframe}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    onLoad={() => {
-                      // Check for video end after reasonable time
-                      setTimeout(async () => {
-                        setVideoPlaying(false)
+                  <>
+                    <iframe
+                      src={embedUrl}
+                      style={styles.iframe}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      onLoad={() => {
+                        // Check for video end after reasonable time
+                        setTimeout(async () => {
+                          setVideoPlaying(false)
 
-                        // Clear time interval
-                        if (timeIntervalRef.current) {
-                          clearInterval(timeIntervalRef.current)
-                        }
+                          // Clear time interval
+                          if (timeIntervalRef.current) {
+                            clearInterval(timeIntervalRef.current)
+                          }
 
-                        // Only close microphone when video actually ends
-                        try {
-                          await makeApiCall("http://localhost:8000/close_microphone", {
-                            method: "GET",
-                          })
-                        } catch (error) {
-                          console.log("Close microphone endpoint not available")
-                        }
+                          // Only close microphone when video actually ends
+                          try {
+                            await makeApiCall("http://localhost:8000/close_microphone", {
+                              method: "GET",
+                            })
+                          } catch (error) {
+                            console.log("Close microphone endpoint not available")
+                          }
 
-                        // Get final score
-                        try {
-                          const response = await makeApiCall("http://localhost:8000/final_score", {
-                            method: "GET",
-                          })
-                          setFinalScore(response.final_score)
-                        } catch (error) {
-                          console.log("Final score endpoint not available")
-                        }
-                      }, 180000) // 3 minutes for demo
-                    }}
-                  />
+                          // Get final score
+                          try {
+                            const response = await makeApiCall("http://localhost:8000/final_score", {
+                              method: "GET",
+                            })
+                            setFinalScore(response.final_score)
+                          } catch (error) {
+                            console.log("Final score endpoint not available")
+                          }
+                        }, 180000) // 3 minutes for demo
+                      }}
+                    />
+                    {/* Transparent overlay to prevent user interaction */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: "transparent",
+                        zIndex: 10,
+                        cursor: "default",
+                      }}
+                    />
+                  </>
                 ) : (
                   <div style={styles.overlay}>
                     <p style={{ fontSize: "20px", marginBottom: "10px" }}>
@@ -2124,7 +2136,7 @@ export default function App() {
             <div
               style={{
                 ...styles.lyricsContainer,
-                ...(isFocusMode ? styles.lyricsContainerFocus : {}),
+                ...( isFocusMode ? styles.lyricsContainerFocus : {}),
               }}
             >
               <p
