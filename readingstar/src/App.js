@@ -1287,7 +1287,7 @@ export default function App() {
                     marginBottom: "8px",
                   }}
                 >
-                  • Dean Mohamedally (University College London)
+                  • Professor Dean Mohamedally (University College London)
                 </p>
               </div>
             </div>
@@ -2039,10 +2039,11 @@ export default function App() {
                 {playlistLoaded ? (
                   allPlaylistNames.map((name) => (
                     <div key={name} style={styles.blockIcon}>
-                      <button
+                      <div
                         style={{
                           ...styles.button,
                           backgroundColor: name === playlistName ? "#00b533" : "#0078d4",
+                          cursor: "pointer",
                         }}
                         onClick={() => switchPlaylist(name)}
                       >
@@ -2066,7 +2067,7 @@ export default function App() {
                           <DeleteIcon />
                         </button>
                         <span style={styles.buttonText}>{name}</span>
-                      </button>
+                      </div>
                     </div>
                   ))
                 ) : (
