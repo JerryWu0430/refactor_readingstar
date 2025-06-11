@@ -157,7 +157,7 @@ const LoadingScreen = ({ attempts, maxAttempts }) => (
           marginRight: "16px",
         }}
       >
-        ReadingStar
+        Reading Star
       </h1>
       <StarIcon />
     </div>
@@ -234,6 +234,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(-1)
   const [videoStartTime, setVideoStartTime] = useState(0)
   const [videoUnavailable, setVideoUnavailable] = useState(false)
+  const [videoLoading, setVideoLoading] = useState(false)
   const [songTitle, setSongTitle] = useState("")
   const [isFocusMode, setIsFocusMode] = useState(false)
   const [showStar, setShowStar] = useState(false)
@@ -536,6 +537,7 @@ export default function App() {
     
     getSongTitle(url)
     setVideoPlaying(false) // Don't start video immediately
+    setVideoLoading(true) // Set loading state
 
     // Reset state for new video
     setLyrics([])
@@ -556,6 +558,7 @@ export default function App() {
       console.log("[Renderer] Starting video now...");
       setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`);
       setVideoPlaying(true);
+      setVideoLoading(false); // Clear loading state
       
       setFinalScore(-1);
       const newStartTime = new Date().getTime();
@@ -572,6 +575,7 @@ export default function App() {
     } else {
       console.log("[Renderer] Failed to load transcript, not starting video");
       setVideoUnavailable(true);
+      setVideoLoading(false); // Clear loading state
     }
 
     try {
@@ -675,7 +679,7 @@ export default function App() {
         // Extract title from URL or use fallback
         const videoId = url.split("v=")[1]?.split("&")[0]
         title = `Video ${videoId || 'Unknown'}`
-        
+
         const songItem = { id: playlist.length, name: title, url: url }
         const newPlaylist = [...playlist, songItem]
         setPlaylist(newPlaylist)
@@ -2120,6 +2124,15 @@ export default function App() {
                         }}
                       />
                     </>
+                  ) : videoLoading ? (
+                    <div style={styles.overlay}>
+                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                        Video Loading...
+                      </p>
+                      <p style={{ fontSize: "16px", color: "#ccc" }}>
+                        We're processing the lyrics and preparing everything for you!
+                      </p>
+                    </div>
                   ) : (
                     <div style={styles.overlay}>
                       <p style={{ fontSize: "20px", marginBottom: "10px" }}>
@@ -2135,30 +2148,21 @@ export default function App() {
                   )
                 ) : (
                   <div style={styles.overlay}>
-                  {videoUnavailable ? (
-                    <>
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                        Unfortunately, this video could not be loaded, or had no captions.
-                      </p>
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                        Use another song or Youtube link to try again.
-                      </p>
-                    </>
-                  ) : youtubeUrl ? (
-                    <>
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                        Please wait, your video is processing...
-                      </p>
-                      <p style={{ fontSize: "16px", color: "#ccc" }}>
-                        We're loading the lyrics and preparing everything for you!
-                      </p>
-                    </>
-                  ) : (
-                    <p style={{ fontSize: "20px" }}>Click the sidebar or enter a YouTube link to play a song!</p>
-                  )}
-                </div>
-              )}
-            </div>
+                    {videoUnavailable ? (
+                      <>
+                        <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                          Unfortunately, this video could not be loaded, or had no captions.
+                        </p>
+                        <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                          Use another song or Youtube link to try again.
+                        </p>
+                      </>
+                    ) : (
+                      <p style={{ fontSize: "20px" }}>Click the sidebar or enter a YouTube link to play a song!</p>
+                    )}
+                  </div>
+                )}
+              </div>
 
             {/* Lyrics Container */}
             <div
