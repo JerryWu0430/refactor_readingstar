@@ -10,7 +10,15 @@ ipcMain.handle('fetch-tactiq-transcript', async (event, youtubeUrl) => {
   try {
     console.log('[Main] Starting transcript fetch for:', youtubeUrl);
     
-    // Go straight to Puppeteer approach with detailed logging
+    // Try direct API call first
+    const directApiResult = await tryDirectApiApproach(youtubeUrl);
+    if (directApiResult && !directApiResult.includes('"error"')) {
+      console.log('[Main] Direct API approach succeeded');
+      return directApiResult;
+    }
+    
+    // Fall back to Puppeteer approach
+    console.log('[Main] Direct API failed, trying Puppeteer approach');
     return await tryPuppeteerApproach(youtubeUrl);
     
   } catch (error) {
@@ -18,6 +26,50 @@ ipcMain.handle('fetch-tactiq-transcript', async (event, youtubeUrl) => {
     throw error;
   }
 });
+
+async function tryDirectApiApproach(youtubeUrl) {
+  try {
+    console.log('[Main] Trying direct API approach...');
+    
+    // Extract video ID
+    const videoIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+    if (!videoIdMatch) {
+      throw new Error('Invalid YouTube URL format');
+    }
+    const videoId = videoIdMatch[1];
+    
+    // Try calling the API directly
+    const fetch = require('node-fetch');
+    
+    const response = await fetch('https://tactiq-apps-prod.tactiq.io/transcript', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Origin': 'https://tactiq.io',
+        'Referer': 'https://tactiq.io/'
+      },
+      body: JSON.stringify({
+        url: youtubeUrl,
+        video_id: videoId
+      })
+    });
+    
+    if (response.ok) {
+      const result = await response.text();
+      console.log('[Main] Direct API response length:', result.length);
+      console.log('[Main] Direct API response preview:', result.substring(0, 200));
+      return result;
+    } else {
+      console.log('[Main] Direct API failed with status:', response.status);
+      return null;
+    }
+    
+  } catch (error) {
+    console.log('[Main] Direct API approach failed:', error.message);
+    return null;
+  }
+}
 
 async function tryPuppeteerApproach(youtubeUrl) {
   let puppeteer;
@@ -72,7 +124,10 @@ async function tryPuppeteerApproach(youtubeUrl) {
     await page.setViewport({ width: 1280, height: 720 });
     console.log('[Main] User agent and viewport set');
     
-    // Enable request interception to block unnecessary resources
+    // Variable to store the transcript response
+    let transcriptApiResponse = null;
+    
+    // Intercept network responses to capture the transcript API call
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       const resourceType = req.resourceType();
@@ -83,6 +138,26 @@ async function tryPuppeteerApproach(youtubeUrl) {
         req.continue();
       }
     });
+    
+    // Listen for responses, especially the transcript API
+    page.on('response', async (response) => {
+      const url = response.url();
+      console.log('[Main] Response from:', url, 'Status:', response.status());
+      
+      // Check if this is the transcript API response
+      if (url.includes('tactiq-apps-prod.tactiq.io/transcript')) {
+        console.log('[Main] Found transcript API response!');
+        try {
+          const responseText = await response.text();
+          console.log('[Main] Transcript API response length:', responseText.length);
+          console.log('[Main] Transcript API response preview:', responseText.substring(0, 200));
+          transcriptApiResponse = responseText;
+        } catch (error) {
+          console.error('[Main] Error reading transcript API response:', error);
+        }
+      }
+    });
+    
     console.log('[Main] Request interception enabled');
     
     // Log console messages from the page
@@ -112,9 +187,39 @@ async function tryPuppeteerApproach(youtubeUrl) {
       throw navigationError;
     }
     
-    // Wait a bit for the page to load
-    console.log('[Main] Waiting for page to stabilize...');
-    await page.waitForTimeout(3000);
+    // Wait for the transcript API call to complete
+    console.log('[Main] Waiting for transcript API response...');
+    let waitTime = 0;
+    const maxWaitTime = 30000; // 30 seconds
+    
+    while (!transcriptApiResponse && waitTime < maxWaitTime) {
+      await page.waitForTimeout(1000);
+      waitTime += 1000;
+      console.log(`[Main] Still waiting for transcript API... ${waitTime/1000}s`);
+    }
+    
+    if (transcriptApiResponse) {
+      console.log('[Main] Successfully captured transcript from API!');
+      console.log('[Main] FULL TRANSCRIPT API RESPONSE:');
+      console.log('='.repeat(50));
+      console.log(transcriptApiResponse);
+      console.log('='.repeat(50));
+      
+      // Close browser immediately when we get the API response
+      try {
+        console.log('[Main] Closing browser after API response...');
+        await browser.close();
+        console.log('[Main] Browser closed successfully');
+        browser = null; // Set to null so it doesn't get closed again in finally
+      } catch (e) {
+        console.error('[Main] Error closing browser:', e.message);
+      }
+      
+      return transcriptApiResponse;
+    }
+    
+    // If API response not captured, fall back to page scraping
+    console.log('[Main] No API response captured, falling back to page scraping...');
     
     // Get page title and URL to verify we're on the right page
     const pageTitle = await page.title();
@@ -265,6 +370,10 @@ async function tryPuppeteerApproach(youtubeUrl) {
     if (transcriptContent && transcriptContent.length > 50) {
       console.log('[Main] Successfully extracted transcript, length:', transcriptContent.length);
       console.log('[Main] Transcript preview:', transcriptContent.substring(0, 200));
+      console.log('[Main] FULL TRANSCRIPT CONTENT:');
+      console.log('='.repeat(50));
+      console.log(transcriptContent);
+      console.log('='.repeat(50));
       return transcriptContent;
     } else {
       console.log('[Main] No meaningful transcript content found');

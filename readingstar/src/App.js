@@ -357,6 +357,10 @@ export default function App() {
       console.log("[Renderer] Received response, type:", typeof transcriptData);
       console.log("[Renderer] Response length:", transcriptData ? transcriptData.length : 'null');
       console.log("[Renderer] Response preview:", transcriptData ? transcriptData.substring(0, 300) : 'null');
+      console.log("[Renderer] FULL RAW TRANSCRIPT DATA:");
+      console.log('='.repeat(60));
+      console.log(transcriptData);
+      console.log('='.repeat(60));
       
       let lyricsArray = [];
       
@@ -379,8 +383,17 @@ export default function App() {
             return false;
           }
           
+          // Handle tactiq.io API response format
+          if (jsonData.captions && Array.isArray(jsonData.captions)) {
+            console.log("[Renderer] Processing tactiq.io captions format...");
+            lyricsArray = jsonData.captions.map((caption) => ({
+              lyric: caption.text,
+              time: parseFloat(caption.start)
+            }));
+            console.log("[Renderer] Converted", lyricsArray.length, "captions to lyrics");
+          }
           // If it's a valid JSON response with transcript data
-          if (Array.isArray(jsonData)) {
+          else if (Array.isArray(jsonData)) {
             console.log("[Renderer] Processing array data...");
             lyricsArray = jsonData.map((item, index) => ({
               lyric: item.text || item.content || item.transcript || String(item),
@@ -531,33 +544,31 @@ export default function App() {
     setVideoUnavailable(false)
     previousLyricRef.current = ""
 
-    console.log("[Renderer] Fetching transcript first, video will start in 5 seconds...");
+    console.log("[Renderer] Fetching transcript first...");
     
     // Fetch transcript first
     const transcriptSuccess = await fetchYoutubeSubtitles(url);
     
     if (transcriptSuccess) {
-      console.log("[Renderer] Transcript loaded successfully, starting video in 5 seconds...");
+      console.log("[Renderer] Transcript loaded successfully, starting video now...");
       
-      // Wait 5 seconds then start the video
-      setTimeout(() => {
-        console.log("[Renderer] Starting video now...");
-        setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`);
-        setVideoPlaying(true);
-        
-        setFinalScore(-1);
-        const newStartTime = new Date().getTime();
-        setVideoStartTime(newStartTime);
+      // Start video immediately after transcript is loaded
+      console.log("[Renderer] Starting video now...");
+      setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`);
+      setVideoPlaying(true);
+      
+      setFinalScore(-1);
+      const newStartTime = new Date().getTime();
+      setVideoStartTime(newStartTime);
 
-        // Start time tracking
-        if (timeIntervalRef.current) {
-          clearInterval(timeIntervalRef.current);
-        }
+      // Start time tracking immediately
+      if (timeIntervalRef.current) {
+        clearInterval(timeIntervalRef.current);
+      }
 
-        timeIntervalRef.current = setInterval(() => {
-          setCurrentTime((prev) => prev + 0.3);
-        }, 300);
-      }, 5000); // 5 second delay
+      timeIntervalRef.current = setInterval(() => {
+        setCurrentTime((prev) => prev + 0.3);
+      }, 300);
     } else {
       console.log("[Renderer] Failed to load transcript, not starting video");
       setVideoUnavailable(true);
@@ -2124,7 +2135,7 @@ export default function App() {
                   )
                 ) : (
                   <div style={styles.overlay}>
-                  {videoUnavailable && (
+                  {videoUnavailable ? (
                     <>
                       <p style={{ fontSize: "20px", marginBottom: "10px" }}>
                         Unfortunately, this video could not be loaded, or had no captions.
@@ -2133,8 +2144,18 @@ export default function App() {
                         Use another song or Youtube link to try again.
                       </p>
                     </>
+                  ) : youtubeUrl ? (
+                    <>
+                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                        Please wait, your video is processing...
+                      </p>
+                      <p style={{ fontSize: "16px", color: "#ccc" }}>
+                        We're loading the lyrics and preparing everything for you!
+                      </p>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: "20px" }}>Click the sidebar or enter a YouTube link to play a song!</p>
                   )}
-                  <p style={{ fontSize: "20px" }}>Click the sidebar or enter a YouTube link to play a song!</p>
                 </div>
               )}
             </div>
