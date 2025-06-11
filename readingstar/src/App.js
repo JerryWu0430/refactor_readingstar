@@ -248,7 +248,6 @@ export default function App() {
   const [isScored, setIsScored] = useState(true)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showContributionModal, setShowContributionModal] = useState(false)
-  const [animationProgress, setAnimationProgress] = useState(0)
 
   const [lyricsSettings, setLyricsSettings] = useState({
     fontSize: 32,
@@ -261,7 +260,6 @@ export default function App() {
   })
 
   const previousLyricRef = useRef("")
-  const animationRef = useRef(null)
   const timeIntervalRef = useRef(null)
 
   // Add function to check API readiness
@@ -728,42 +726,6 @@ export default function App() {
     setDifficulty(difficulty)
   }
 
-  // Animation effect for lyrics - now uses duration from lyric data
-  useEffect(() => {
-    if (currentLyric && lyrics.length > 0) {
-      const currentIndex = lyrics.findIndex((lyric) => lyric.lyric === currentLyric)
-      const currentLyricData = lyrics[currentIndex]
-      
-      if (currentLyricData) {
-        // Use the duration from the lyric data, fallback to 2 seconds
-        const duration = (currentLyricData.duration || 2) * 1000
-
-        setAnimationProgress(0)
-        const startTime = Date.now()
-
-        const animate = () => {
-          const elapsed = Date.now() - startTime
-          const progress = Math.min(elapsed / duration, 1)
-          setAnimationProgress(progress)
-
-          if (progress < 1) {
-            animationRef.current = requestAnimationFrame(animate)
-          } else {
-            setAnimationProgress(0) // Reset when complete
-          }
-        }
-
-        animationRef.current = requestAnimationFrame(animate)
-
-        return () => {
-          if (animationRef.current) {
-            cancelAnimationFrame(animationRef.current)
-          }
-        }
-      }
-    }
-  }, [currentLyric, lyrics])
-
   useEffect(() => {
     if (currentTime > 0 && lyrics.length > 0) {
       const elapsedTime = currentTime
@@ -824,9 +786,6 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange)
       if (timeIntervalRef.current) {
         clearInterval(timeIntervalRef.current)
-      }
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
       }
     }
   }, [])
@@ -1147,19 +1106,6 @@ export default function App() {
       zIndex: 10,
       width: "500px",
       height: "500px",
-    },
-    slidingBarContainer: {
-      width: "100%",
-      maxWidth: "500px",
-      height: "5px",
-      backgroundColor: "transparent",
-      overflow: "hidden",
-      position: "relative",
-    },
-    slidingBar: {
-      height: "5px",
-      backgroundColor: "#FFD700",
-      transition: "width 0.1s ease-out",
     },
     iconButton: {
       padding: "8px",
@@ -2192,14 +2138,7 @@ export default function App() {
               >
                 {removeBracketedText(currentLyric)}
               </p>
-              <div style={styles.slidingBarContainer}>
-                <div
-                  style={{
-                    ...styles.slidingBar,
-                    width: `${animationProgress * 100}%`,
-                  }}
-                />
-              </div>
+
             </div>
           </div>
         </div>
