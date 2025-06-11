@@ -765,10 +765,10 @@ export default function App() {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // Clear time interval when app goes to background
-        if (timeIntervalRef.current) {
-          clearInterval(timeIntervalRef.current)
-        }
+        // Remove timer stopping - let it continue running
+        // if (timeIntervalRef.current) {
+        //   clearInterval(timeIntervalRef.current)
+        // }
 
         try {
           makeApiCall("http://localhost:8000/close_microphone", {
