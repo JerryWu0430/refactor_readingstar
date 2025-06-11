@@ -1141,8 +1141,8 @@ export default function App() {
     },
     starContainer: {
       position: "relative",
-      top: "50%",
-      left: "50%",
+      top: "70%",
+      left: "47%",
       transform: "translate(-50%, -50%)",
       zIndex: 10,
       width: "500px",
