@@ -764,6 +764,12 @@ export default function App() {
 
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Only handle visibility changes if the API is ready and app is loaded
+      if (!isApiReady || !apiAvailable) {
+        console.log("Skipping visibility change handling - API not ready yet");
+        return;
+      }
+
       if (document.hidden) {
         // Remove timer stopping - let it continue running
         // if (timeIntervalRef.current) {
@@ -780,7 +786,10 @@ export default function App() {
       }
     }
 
-    document.addEventListener("visibilitychange", handleVisibilityChange)
+    // Only add the event listener if the API is ready
+    if (isApiReady) {
+      document.addEventListener("visibilitychange", handleVisibilityChange)
+    }
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange)
@@ -788,7 +797,7 @@ export default function App() {
         clearInterval(timeIntervalRef.current)
       }
     }
-  }, [])
+  }, [isApiReady, apiAvailable]) // Add dependencies to re-run when API status changes
 
   const removeBracketedText = (lyric) => {
     if (lyric.includes("[") && lyric.includes("]")) {
