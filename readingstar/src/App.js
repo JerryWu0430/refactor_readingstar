@@ -389,7 +389,8 @@ export default function App() {
             console.log("[Renderer] Processing tactiq.io captions format...");
             lyricsArray = jsonData.captions.map((caption) => ({
               lyric: caption.text,
-              time: parseFloat(caption.start)
+              time: parseFloat(caption.start),
+              duration: parseFloat(caption.dur || 3) // Use dur if available, fallback to 3 seconds
             }));
             console.log("[Renderer] Converted", lyricsArray.length, "captions to lyrics");
           }
@@ -398,13 +399,15 @@ export default function App() {
             console.log("[Renderer] Processing array data...");
             lyricsArray = jsonData.map((item, index) => ({
               lyric: item.text || item.content || item.transcript || String(item),
-              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3),
+              duration: parseFloat(item.dur || item.duration || 3)
             }));
           } else if (jsonData.transcript && Array.isArray(jsonData.transcript)) {
             console.log("[Renderer] Processing transcript array...");
             lyricsArray = jsonData.transcript.map((item, index) => ({
               lyric: item.text || item.content || String(item),
-              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3),
+              duration: parseFloat(item.dur || item.duration || 3)
             }));
           }
           
@@ -442,7 +445,8 @@ export default function App() {
                   console.log(`[Renderer] Segment ${i}:`, timeStr, "->", cleanText);
                   lyricsArray.push({
                     lyric: cleanText,
-                    time: totalSeconds
+                    time: totalSeconds,
+                    duration: 3 // Default duration
                   });
                 }
               }
@@ -472,7 +476,8 @@ export default function App() {
               
               lyricsArray = sentences.map((sentence, index) => ({
                 lyric: sentence,
-                time: index * 3 // 3 seconds per sentence
+                time: index * 3, // 3 seconds per sentence
+                duration: 3
               }));
               
               console.log("[Renderer] First few sentences:", sentences.slice(0, 3));
@@ -723,33 +728,37 @@ export default function App() {
     setDifficulty(difficulty)
   }
 
-  // Animation effect for lyrics
+  // Animation effect for lyrics - now uses duration from lyric data
   useEffect(() => {
-    if (currentLyric) {
+    if (currentLyric && lyrics.length > 0) {
       const currentIndex = lyrics.findIndex((lyric) => lyric.lyric === currentLyric)
-      const nextLyric = lyrics[currentIndex + 1]
-      const duration = nextLyric ? (nextLyric.time - lyrics[currentIndex].time) * 1000 : 2000
+      const currentLyricData = lyrics[currentIndex]
+      
+      if (currentLyricData) {
+        // Use the duration from the lyric data, fallback to 2 seconds
+        const duration = (currentLyricData.duration || 2) * 1000
 
-      setAnimationProgress(0)
-      const startTime = Date.now()
+        setAnimationProgress(0)
+        const startTime = Date.now()
 
-      const animate = () => {
-        const elapsed = Date.now() - startTime
-        const progress = Math.min(elapsed / duration, 1)
-        setAnimationProgress(progress)
+        const animate = () => {
+          const elapsed = Date.now() - startTime
+          const progress = Math.min(elapsed / duration, 1)
+          setAnimationProgress(progress)
 
-        if (progress < 1) {
-          animationRef.current = requestAnimationFrame(animate)
-        } else {
-          setAnimationProgress(0) // Reset when complete
+          if (progress < 1) {
+            animationRef.current = requestAnimationFrame(animate)
+          } else {
+            setAnimationProgress(0) // Reset when complete
+          }
         }
-      }
 
-      animationRef.current = requestAnimationFrame(animate)
+        animationRef.current = requestAnimationFrame(animate)
 
-      return () => {
-        if (animationRef.current) {
-          cancelAnimationFrame(animationRef.current)
+        return () => {
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current)
+          }
         }
       }
     }
@@ -759,14 +768,12 @@ export default function App() {
     if (currentTime > 0 && lyrics.length > 0) {
       const elapsedTime = currentTime
 
-      // Find the current lyric based on elapsed time with proper safety checks
-      const currentLyricObj = lyrics.reduce((prev, curr) => {
-        // Safety check: ensure both prev and curr exist and have time property
-        if (!prev || !curr || typeof curr.time !== "number") {
-          return prev || { lyric: "", time: 0 }
-        }
-        return curr.time <= elapsedTime ? curr : prev
-      }, { lyric: "", time: 0 })
+      // Find the current lyric by sorting and picking the highest start time that's <= currentTime
+      const validLyrics = lyrics
+        .filter(lyric => lyric && typeof lyric.time === "number" && lyric.time <= elapsedTime)
+        .sort((a, b) => b.time - a.time) // Sort by time descending
+      
+      const currentLyricObj = validLyrics[0] || { lyric: "", time: 0 } // Get the most recent lyric
 
       // Safety check: ensure currentLyricObj exists and has lyric property
       const currentLyricText = currentLyricObj?.lyric || ""
