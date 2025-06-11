@@ -1100,9 +1100,8 @@ export default function App() {
     },
     starContainer: {
       position: "absolute",
-      top: "80%",
-      left: "47%",
-      transform: "translate(-50%, -50%)",
+      top: "82%",
+      left: "50%",
       zIndex: 10,
       width: "500px",
       height: "500px",
