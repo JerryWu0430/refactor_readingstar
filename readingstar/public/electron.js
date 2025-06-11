@@ -5,6 +5,44 @@ const fs = require('fs');
 
 let apiProcess = null;
 
+// Set app icon at the app level
+function setAppIcon() {
+  const isDev = !app.isPackaged;
+  let iconPath;
+  
+  if (isDev) {
+    // In development, look for icon in public folder
+    iconPath = path.join(__dirname, 'icon.png');
+    // Also try common icon names
+    const iconNames = ['icon.png', 'StoreLogo.png', 'app-icon.png', 'logo.png'];
+    for (const iconName of iconNames) {
+      const testPath = path.join(__dirname, iconName);
+      if (fs.existsSync(testPath)) {
+        iconPath = testPath;
+        break;
+      }
+    }
+  } else {
+    // In production, look in resources
+    iconPath = path.join(process.resourcesPath, 'icon.png');
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(process.resourcesPath, 'StoreLogo.png');
+    }
+  }
+  
+  if (fs.existsSync(iconPath)) {
+    console.log('Setting app icon:', iconPath);
+    // Set the dock icon on macOS and taskbar icon on Windows/Linux
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(iconPath);
+    }
+    return iconPath;
+  } else {
+    console.log('No icon file found for app');
+    return null;
+  }
+}
+
 // Remove YouTube handlers, keep only tactiq with Puppeteer support
 ipcMain.handle('fetch-tactiq-transcript', async (event, youtubeUrl) => {
   try {
@@ -503,19 +541,9 @@ function killApiProcess() {
 }
 
 function createWindow() {
-  // Determine the correct icon path
-  const isDev = !app.isPackaged;
-  let iconPath;
+  // Get the app icon path
+  const iconPath = setAppIcon();
   
-  if (isDev) {
-    // In development, look for icon in public folder
-    iconPath = path.join(__dirname, 'StoreLogo.png');
-  } else {
-    // In production, look in resources
-    iconPath = path.join(process.resourcesPath, 'StoreLogo.png');
-  }
-  
-  // Check if icon exists, if not use a fallback or no icon
   let windowOptions = {
     width: 1200,
     height: 800,
@@ -525,33 +553,23 @@ function createWindow() {
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js')
     },
+    // Set window title
+    title: 'ReadingStar',
+    // Set window icon
+    ...(iconPath && { icon: iconPath }),
+    // Additional window properties for better icon display
+    show: false, // Don't show until ready
   };
-  
-  // Try to set icon if file exists
-  if (fs.existsSync(iconPath)) {
-    console.log('Setting application icon:', iconPath);
-    windowOptions.icon = iconPath;
-  } else {
-    console.log('Icon file not found at:', iconPath);
-    // Try alternative paths
-    const alternativePaths = [
-      path.join(__dirname, 'icon.png'),
-      path.join(__dirname, 'assets', 'StoreLogo.png'),
-      path.join(__dirname, '..', 'assets', 'StoreLogo.png')
-    ];
-    
-    for (const altPath of alternativePaths) {
-      if (fs.existsSync(altPath)) {
-        console.log('Found icon at alternative path:', altPath);
-        windowOptions.icon = altPath;
-        break;
-      }
-    }
-  }
   
   const win = new BrowserWindow(windowOptions);
 
+  // Show window when ready to prevent icon flicker
+  win.once('ready-to-show', () => {
+    win.show();
+  });
+
   // Use app.isPackaged instead of electron-is-dev
+  const isDev = !app.isPackaged;
   const startURL = isDev
     ? 'http://localhost:3000'
     : `file://${path.join(__dirname, '../build/index.html')}`;
@@ -562,9 +580,14 @@ function createWindow() {
   if (isDev) {
     win.webContents.openDevTools();
   }
+  
+  return win;
 }
 
 app.whenReady().then(() => {
+  // Set the app icon first
+  setAppIcon();
+  
   // Spawn the API process before creating the window
   spawnApiProcess();
   createWindow();

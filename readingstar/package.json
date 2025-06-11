@@ -2,6 +2,8 @@
   "name": "readingstar",
   "version": "0.1.0",
   "private": true,
+  "description": "ReadingStar - Interactive Singing and Reading Application",
+  "author": "ReadingStar Team",
   "dependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -71,7 +73,16 @@
       }
     ],
     "win": {
+      "icon": "public/StoreLogo.ico",
       "target": "nsis"
+    },
+    "mac": {
+      "icon": "public/StoreLogo.ico",
+      "category": "public.app-category.music"
+    },
+    "linux": {
+      "icon": "public/StoreLogo.ico",
+      "target": "AppImage"
     },
     "nsis": {
       "oneClick": false,
