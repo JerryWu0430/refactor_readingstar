@@ -1129,13 +1129,13 @@ export default function App() {
       fontWeight: "bold",
     },
     starContainer: {
-      position: "absolute",
+      position: "relative",
       top: "50%",
       left: "50%",
       transform: "translate(-50%, -50%)",
       zIndex: 10,
-      width: "100px",
-      height: "100px",
+      width: "500px",
+      height: "500px",
     },
     slidingBarContainer: {
       width: "100%",
