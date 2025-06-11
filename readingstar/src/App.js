@@ -349,13 +349,180 @@ export default function App() {
 
   const onToggleSwitch = () => setIsScored(!isScored)
 
+  const fetchTactiqTranscript = async (url) => {
+    try {
+      console.log("[Renderer] Attempting tactiq.io transcript fetch for:", url);
+      
+      const transcriptData = await window.electronAPI.fetchTactiqTranscript(url);
+      console.log("[Renderer] Received response, type:", typeof transcriptData);
+      console.log("[Renderer] Response length:", transcriptData ? transcriptData.length : 'null');
+      console.log("[Renderer] Response preview:", transcriptData ? transcriptData.substring(0, 300) : 'null');
+      
+      let lyricsArray = [];
+      
+      if (typeof transcriptData === 'string') {
+        // Try to parse as JSON first (for error responses)
+        try {
+          const jsonData = JSON.parse(transcriptData);
+          console.log("[Renderer] Parsed as JSON:", jsonData);
+          
+          // Handle error responses
+          if (jsonData.error) {
+            console.warn("[Renderer] Tactiq.io error:", jsonData.message);
+            console.log("[Renderer] Error details:", jsonData);
+            
+            if (jsonData.error === "PUPPETEER_NOT_AVAILABLE") {
+              console.log("[Renderer] Install command:", jsonData.install_command);
+            }
+            
+            setVideoUnavailable(true);
+            return false;
+          }
+          
+          // If it's a valid JSON response with transcript data
+          if (Array.isArray(jsonData)) {
+            console.log("[Renderer] Processing array data...");
+            lyricsArray = jsonData.map((item, index) => ({
+              lyric: item.text || item.content || item.transcript || String(item),
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
+            }));
+          } else if (jsonData.transcript && Array.isArray(jsonData.transcript)) {
+            console.log("[Renderer] Processing transcript array...");
+            lyricsArray = jsonData.transcript.map((item, index) => ({
+              lyric: item.text || item.content || String(item),
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
+            }));
+          }
+          
+        } catch (parseError) {
+          console.log("[Renderer] Not JSON, processing as raw transcript text...");
+          console.log("[Renderer] Parse error:", parseError.message);
+          
+          // Process raw transcript text from browser
+          if (transcriptData.length > 100) {
+            console.log("[Renderer] Processing raw transcript, length:", transcriptData.length);
+            
+            // Enhanced Method 1: Look for timestamp patterns and properly separate them
+            console.log("[Renderer] Looking for timestamp patterns...");
+            
+            // Split by timestamp pattern and process each segment
+            const segments = transcriptData.split(/(\d{2}:\d{2}:\d{2}\.\d{3})/);
+            console.log("[Renderer] Split into", segments.length, "segments");
+            
+            for (let i = 1; i < segments.length; i += 2) {
+              const timeStr = segments[i];
+              const text = segments[i + 1];
+              
+              if (timeStr && text && text.trim().length > 5) {
+                // Convert timestamp to seconds
+                const timeParts = timeStr.split(':');
+                const hours = parseInt(timeParts[0]);
+                const minutes = parseInt(timeParts[1]);
+                const secondsAndMs = parseFloat(timeParts[2]);
+                const totalSeconds = hours * 3600 + minutes * 60 + secondsAndMs;
+                
+                // Clean the text
+                const cleanText = text.replace(/\d{2}:\d{2}:\d{2}\.\d{3}/g, '').trim();
+                
+                if (cleanText.length > 3) {
+                  console.log(`[Renderer] Segment ${i}:`, timeStr, "->", cleanText);
+                  lyricsArray.push({
+                    lyric: cleanText,
+                    time: totalSeconds
+                  });
+                }
+              }
+            }
+            
+            // Method 2: If no timestamps, split by sentences/lines
+            if (lyricsArray.length === 0) {
+              console.log("[Renderer] No timestamps found, splitting by sentences...");
+              
+              // Clean the text first
+              let cleanText = transcriptData
+                .replace(/Tactiq|YouTube Transcript Generator|Get started|Copy|Download|Privacy Policy|Terms of Service/gi, '')
+                .replace(/\d{2}:\d{2}:\d{2}\.\d{3}/g, '') // Remove any remaining timestamps
+                .replace(/\s+/g, ' ')
+                .trim();
+              
+              console.log("[Renderer] Cleaned text length:", cleanText.length);
+              console.log("[Renderer] Cleaned text preview:", cleanText.substring(0, 200));
+              
+              // Split by sentences or lines
+              const sentences = cleanText
+                .split(/[.!?]+|\n/)
+                .map(s => s.trim())
+                .filter(s => s.length > 10);
+              
+              console.log(`[Renderer] Split into ${sentences.length} sentences`);
+              
+              lyricsArray = sentences.map((sentence, index) => ({
+                lyric: sentence,
+                time: index * 3 // 3 seconds per sentence
+              }));
+              
+              console.log("[Renderer] First few sentences:", sentences.slice(0, 3));
+            }
+          }
+        }
+      }
+      
+      console.log("[Renderer] Final lyrics array length:", lyricsArray.length);
+      if (lyricsArray.length > 0) {
+        console.log("[Renderer] First few entries:", lyricsArray.slice(0, 3));
+        
+        setLyrics(lyricsArray);
+        setVideoUnavailable(false);
+        
+        // Send to backend if available
+        try {
+          await makeApiCall("http://localhost:8000/full_lyric", {
+            method: "POST",
+            body: JSON.stringify({ lyric: lyricsArray }),
+          });
+        } catch (error) {
+          console.log("Full lyric endpoint not available");
+        }
+        
+        return true;
+      } else {
+        console.warn("[Renderer] No transcript data found");
+        setVideoUnavailable(true);
+        return false;
+      }
+      
+    } catch (error) {
+      console.error("[Renderer] Error fetching tactiq transcript:", error);
+      return false;
+    }
+  };
+
+  const fetchYoutubeSubtitles = async (url) => {
+    console.log("[Renderer] Fetching subtitles using tactiq.io only...")
+    
+    try {
+      const tactiqSuccess = await fetchTactiqTranscript(url);
+      
+      if (!tactiqSuccess) {
+        console.error("[Renderer] Tactiq.io transcript fetch failed")
+        setVideoUnavailable(true)
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error("[Renderer] Error in fetchYoutubeSubtitles:", error)
+      setVideoUnavailable(true)
+      return false;
+    }
+  }
+
   const getYoutubeEmbedUrl = async (url) => {
     const videoId = url.split("v=")[1]
     const ampersandPosition = videoId ? videoId.indexOf("&") : -1
     const finalVideoId = ampersandPosition !== -1 ? videoId.substring(0, ampersandPosition) : videoId
-    setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`)
+    
     getSongTitle(url)
-    setVideoPlaying(true)
+    setVideoPlaying(false) // Don't start video immediately
 
     // Reset state for new video
     setLyrics([])
@@ -364,20 +531,37 @@ export default function App() {
     setVideoUnavailable(false)
     previousLyricRef.current = ""
 
-    fetchYoutubeSubtitles(url)
-    setFinalScore(-1)
+    console.log("[Renderer] Fetching transcript first, video will start in 5 seconds...");
+    
+    // Fetch transcript first
+    const transcriptSuccess = await fetchYoutubeSubtitles(url);
+    
+    if (transcriptSuccess) {
+      console.log("[Renderer] Transcript loaded successfully, starting video in 5 seconds...");
+      
+      // Wait 5 seconds then start the video
+      setTimeout(() => {
+        console.log("[Renderer] Starting video now...");
+        setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`);
+        setVideoPlaying(true);
+        
+        setFinalScore(-1);
+        const newStartTime = new Date().getTime();
+        setVideoStartTime(newStartTime);
 
-    const newStartTime = new Date().getTime()
-    setVideoStartTime(newStartTime)
+        // Start time tracking
+        if (timeIntervalRef.current) {
+          clearInterval(timeIntervalRef.current);
+        }
 
-    // Start time tracking
-    if (timeIntervalRef.current) {
-      clearInterval(timeIntervalRef.current)
+        timeIntervalRef.current = setInterval(() => {
+          setCurrentTime((prev) => prev + 0.3);
+        }, 300);
+      }, 5000); // 5 second delay
+    } else {
+      console.log("[Renderer] Failed to load transcript, not starting video");
+      setVideoUnavailable(true);
     }
-
-    timeIntervalRef.current = setInterval(() => {
-      setCurrentTime((prev) => prev + 0.3)
-    }, 300)
 
     try {
       await makeApiCall("http://localhost:8000/close_microphone", {
@@ -470,168 +654,6 @@ export default function App() {
       setPlaylist([])
     } catch (error) {
       console.log("Create playlist endpoint not available")
-    }
-  }
-
-  const fetchTactiqTranscript = async (url) => {
-    try {
-      console.log("[Renderer] Attempting tactiq.io transcript fetch for:", url);
-      
-      const transcriptData = await window.electronAPI.fetchTactiqTranscript(url);
-      console.log("[Renderer] Received response, type:", typeof transcriptData);
-      console.log("[Renderer] Response length:", transcriptData ? transcriptData.length : 'null');
-      console.log("[Renderer] Response preview:", transcriptData ? transcriptData.substring(0, 300) : 'null');
-      
-      let lyricsArray = [];
-      
-      if (typeof transcriptData === 'string') {
-        // Try to parse as JSON first (for error responses)
-        try {
-          const jsonData = JSON.parse(transcriptData);
-          console.log("[Renderer] Parsed as JSON:", jsonData);
-          
-          // Handle error responses
-          if (jsonData.error) {
-            console.warn("[Renderer] Tactiq.io error:", jsonData.message);
-            console.log("[Renderer] Error details:", jsonData);
-            
-            if (jsonData.error === "PUPPETEER_NOT_AVAILABLE") {
-              console.log("[Renderer] Install command:", jsonData.install_command);
-            }
-            
-            setVideoUnavailable(true);
-            return false;
-          }
-          
-          // If it's a valid JSON response with transcript data
-          if (Array.isArray(jsonData)) {
-            console.log("[Renderer] Processing array data...");
-            lyricsArray = jsonData.map((item, index) => ({
-              lyric: item.text || item.content || item.transcript || String(item),
-              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
-            }));
-          } else if (jsonData.transcript && Array.isArray(jsonData.transcript)) {
-            console.log("[Renderer] Processing transcript array...");
-            lyricsArray = jsonData.transcript.map((item, index) => ({
-              lyric: item.text || item.content || String(item),
-              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
-            }));
-          }
-          
-        } catch (parseError) {
-          console.log("[Renderer] Not JSON, processing as raw transcript text...");
-          console.log("[Renderer] Parse error:", parseError.message);
-          
-          // Process raw transcript text from browser
-          if (transcriptData.length > 100) {
-            console.log("[Renderer] Processing raw transcript, length:", transcriptData.length);
-            
-            // Method 1: Look for timestamp patterns first
-            console.log("[Renderer] Looking for timestamp patterns...");
-            const timePattern = /(\d{1,2}:\d{2}(?::\d{2})?)\s+([^\n\r]+)/g;
-            let match;
-            let timeMatches = 0;
-            
-            while ((match = timePattern.exec(transcriptData)) !== null) {
-              const timeStr = match[1];
-              const text = match[2].trim();
-              timeMatches++;
-              
-              if (text.length > 5) {
-                console.log(`[Renderer] Found timestamped text ${timeMatches}:`, timeStr, "->", text.substring(0, 50));
-                
-                const timeParts = timeStr.split(':').map(Number);
-                let seconds = 0;
-                if (timeParts.length === 3) {
-                  seconds = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2];
-                } else if (timeParts.length === 2) {
-                  seconds = timeParts[0] * 60 + timeParts[1];
-                }
-                
-                lyricsArray.push({
-                  lyric: text,
-                  time: seconds
-                });
-              }
-            }
-            
-            console.log(`[Renderer] Found ${timeMatches} timestamp matches, extracted ${lyricsArray.length} lyrics`);
-            
-            // Method 2: If no timestamps, split by sentences/lines
-            if (lyricsArray.length === 0) {
-              console.log("[Renderer] No timestamps found, splitting by sentences...");
-              
-              // Clean the text first
-              let cleanText = transcriptData
-                .replace(/Tactiq|YouTube Transcript Generator|Get started|Copy|Download|Privacy Policy|Terms of Service/gi, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-              
-              console.log("[Renderer] Cleaned text length:", cleanText.length);
-              console.log("[Renderer] Cleaned text preview:", cleanText.substring(0, 200));
-              
-              // Split by sentences or lines
-              const sentences = cleanText
-                .split(/[.!?]+|\n/)
-                .map(s => s.trim())
-                .filter(s => s.length > 10);
-              
-              console.log(`[Renderer] Split into ${sentences.length} sentences`);
-              
-              lyricsArray = sentences.map((sentence, index) => ({
-                lyric: sentence,
-                time: index * 3 // 3 seconds per sentence
-              }));
-              
-              console.log("[Renderer] First few sentences:", sentences.slice(0, 3));
-            }
-          }
-        }
-      }
-      
-      console.log("[Renderer] Final lyrics array length:", lyricsArray.length);
-      if (lyricsArray.length > 0) {
-        console.log("[Renderer] First few entries:", lyricsArray.slice(0, 3));
-        
-        setLyrics(lyricsArray);
-        setVideoUnavailable(false);
-        
-        // Send to backend if available
-        try {
-          await makeApiCall("http://localhost:8000/full_lyric", {
-            method: "POST",
-            body: JSON.stringify({ lyric: lyricsArray }),
-          });
-        } catch (error) {
-          console.log("Full lyric endpoint not available");
-        }
-        
-        return true;
-      } else {
-        console.warn("[Renderer] No transcript data found");
-        setVideoUnavailable(true);
-        return false;
-      }
-      
-    } catch (error) {
-      console.error("[Renderer] Error fetching tactiq transcript:", error);
-      return false;
-    }
-  };
-
-  const fetchYoutubeSubtitles = async (url) => {
-    console.log("[Renderer] Fetching subtitles using tactiq.io only...")
-    
-    try {
-      const tactiqSuccess = await fetchTactiqTranscript(url);
-      
-      if (!tactiqSuccess) {
-        console.error("[Renderer] Tactiq.io transcript fetch failed")
-        setVideoUnavailable(true)
-      }
-    } catch (error) {
-      console.error("[Renderer] Error in fetchYoutubeSubtitles:", error)
-      setVideoUnavailable(true)
     }
   }
 
@@ -1889,219 +1911,219 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content */}
-      <div style={styles.content}>
-        {/* Sidebar */}
-        {!isFocusMode && (
-          <div style={styles.sidebar}>
-            <h2 style={styles.playlistTitle}>{playlistName}</h2>
-            <div
-              style={{
-                maxHeight: "400px",
-                overflowY: "auto",
-              }}
-            >
-              {playlistLoaded && playlist ? (
-                playlist.length > 0 ? (
-                  playlist.map((song) => (
-                    <div
-                      key={song.id}
-                      style={{
-                        ...styles.playlistItem,
-                        ...(song.name === selectedSong ? styles.playlistItemSelected : {}),
-                      }}
-                      onClick={() => playFromCurrentPlaylist(song.name)}
-                    >
-                      <span
+        {/* Main Content */}
+        <div style={styles.content}>
+          {/* Sidebar */}
+          {!isFocusMode && (
+            <div style={styles.sidebar}>
+              <h2 style={styles.playlistTitle}>{playlistName}</h2>
+              <div
+                style={{
+                  maxHeight: "400px",
+                  overflowY: "auto",
+                }}
+              >
+                {playlistLoaded && playlist ? (
+                  playlist.length > 0 ? (
+                    playlist.map((song) => (
+                      <div
+                        key={song.id}
                         style={{
-                          ...styles.playlistItemText,
-                          ...(song.name === selectedSong ? styles.playlistItemTextSelected : {}),
+                          ...styles.playlistItem,
+                          ...(song.name === selectedSong ? styles.playlistItemSelected : {}),
                         }}
+                        onClick={() => playFromCurrentPlaylist(song.name)}
                       >
-                        {song.name}
-                      </span>
-                      <button
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: "4px",
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removePlaylistJson(playlistName, song.name)
-                        }}
-                      >
-                        <DeleteIcon />
-                      </button>
-                    </div>
-                  ))
+                        <span
+                          style={{
+                            ...styles.playlistItemText,
+                            ...(song.name === selectedSong ? styles.playlistItemTextSelected : {}),
+                          }}
+                        >
+                          {song.name}
+                        </span>
+                        <button
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: "4px",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removePlaylistJson(playlistName, song.name)
+                          }}
+                        >
+                          <DeleteIcon />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={styles.playlistSubtitle}>Add some songs...</p>
+                  )
                 ) : (
-                  <p style={styles.playlistSubtitle}>Add some songs...</p>
-                )
-              ) : (
-                <p>Playlist empty.</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Main Content Area */}
-        <div
-          style={{
-            ...styles.mainContent,
-            ...(isFocusMode ? styles.mainContentFocus : {}),
-          }}
-        >
-          {/* Focus Mode Background */}
-          {isFocusMode && (
-            <div style={styles.fullscreenBackground}>
-              {lyricsSettings.background === "black" ? (
-                <div
-                  style={{
-                    ...styles.solidBackground,
-                    backgroundColor: "#000000",
-                  }}
-                />
-              ) : lyricsSettings.background === "white" ? (
-                <div
-                  style={{
-                    ...styles.solidBackground,
-                    backgroundColor: "#FFFFFF",
-                  }}
-                />
-              ) : (
-                <img
-                  src={backgroundImages[lyricsSettings.background]}
-                  alt="Background"
-                  style={styles.backgroundImage}
-                />
-              )}
+                  <p>Playlist empty.</p>
+                )}
+              </div>
             </div>
           )}
 
+          {/* Main Content Area */}
           <div
             style={{
-              ...styles.contentOverlay,
-              ...(isFocusMode ? styles.contentOverlayFocus : {}),
+              ...styles.mainContent,
+              ...(isFocusMode ? styles.mainContentFocus : {}),
             }}
           >
-            {/* Score Container */}
-            {isScored && (
-              <div
-                style={{
-                  ...styles.scoreContainer,
-                  ...(isFocusMode ? styles.scoreContainerFocus : {}),
-                }}
-              >
-                <span style={styles.scoreText}>Score: {score}</span>
+            {/* Focus Mode Background */}
+            {isFocusMode && (
+              <div style={styles.fullscreenBackground}>
+                {lyricsSettings.background === "black" ? (
+                  <div
+                    style={{
+                      ...styles.solidBackground,
+                      backgroundColor: "#000000",
+                    }}
+                  />
+                ) : lyricsSettings.background === "white" ? (
+                  <div
+                    style={{
+                      ...styles.solidBackground,
+                      backgroundColor: "#FFFFFF",
+                    }}
+                  />
+                ) : (
+                  <img
+                    src={backgroundImages[lyricsSettings.background]}
+                    alt="Background"
+                    style={styles.backgroundImage}
+                  />
+                )}
               </div>
             )}
 
-            {/* URL Input */}
-            {!isFocusMode && (
-              <div style={styles.inputContainer}>
-                <input
-                  type="text"
-                  value={inputUrl}
-                  onChange={(e) => setInputUrl(e.target.value)}
-                  placeholder="Enter YouTube URL"
-                  style={styles.textInput}
-                />
-                <button
-                  style={styles.goButton}
-                  onClick={() => {
-                    if (inputUrl.length > 0 && inputUrl.includes("youtube.com")) {
-                      let url = inputUrl
-                      if (url.includes("&")) {
-                        url = url.split("&")[0]
-                      }
-                      setYoutubeUrl(url)
-                      getYoutubeEmbedUrl(url)
-                      setInputUrl("")
-                    }
-                  }}
-                >
-                  Go
-                </button>
-              </div>
-            )}
-
-            {/* Video Container */}
             <div
               style={{
-                ...styles.videoContainer,
-                ...(isFocusMode ? styles.videoContainerFocus : {}),
+                ...styles.contentOverlay,
+                ...(isFocusMode ? styles.contentOverlayFocus : {}),
               }}
             >
-              {youtubeUrl ? (
-                videoPlaying ? (
-                  <>
-                    <iframe
-                      src={embedUrl}
-                      style={styles.iframe}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      onLoad={() => {
-                        // Check for video end after reasonable time
-                        setTimeout(async () => {
-                          setVideoPlaying(false)
+              {/* Score Container */}
+              {isScored && (
+                <div
+                  style={{
+                    ...styles.scoreContainer,
+                    ...(isFocusMode ? styles.scoreContainerFocus : {}),
+                  }}
+                >
+                  <span style={styles.scoreText}>Score: {score}</span>
+                </div>
+              )}
 
-                          // Clear time interval
-                          if (timeIntervalRef.current) {
-                            clearInterval(timeIntervalRef.current)
-                          }
+              {/* URL Input */}
+              {!isFocusMode && (
+                <div style={styles.inputContainer}>
+                  <input
+                    type="text"
+                    value={inputUrl}
+                    onChange={(e) => setInputUrl(e.target.value)}
+                    placeholder="Enter YouTube URL"
+                    style={styles.textInput}
+                  />
+                  <button
+                    style={styles.goButton}
+                    onClick={() => {
+                      if (inputUrl.length > 0 && inputUrl.includes("youtube.com")) {
+                        let url = inputUrl
+                        if (url.includes("&")) {
+                          url = url.split("&")[0]
+                        }
+                        setYoutubeUrl(url)
+                        getYoutubeEmbedUrl(url)
+                        setInputUrl("")
+                      }
+                    }}
+                  >
+                    Go
+                  </button>
+                </div>
+              )}
 
-                          // Only close microphone when video actually ends
-                          try {
-                            await makeApiCall("http://localhost:8000/close_microphone", {
-                              method: "GET",
-                            })
-                          } catch (error) {
-                            console.log("Close microphone endpoint not available")
-                          }
+              {/* Video Container */}
+              <div
+                style={{
+                  ...styles.videoContainer,
+                  ...(isFocusMode ? styles.videoContainerFocus : {}),
+                }}
+              >
+                {youtubeUrl ? (
+                  videoPlaying ? (
+                    <>
+                      <iframe
+                        src={embedUrl}
+                        style={styles.iframe}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        onLoad={() => {
+                          // Check for video end after reasonable time
+                          setTimeout(async () => {
+                            setVideoPlaying(false)
 
-                          // Get final score
-                          try {
-                            const response = await makeApiCall("http://localhost:8000/final_score", {
-                              method: "GET",
-                            })
-                            setFinalScore(response.final_score)
-                          } catch (error) {
-                            console.log("Final score endpoint not available")
-                          }
-                        }, 180000) // 3 minutes for demo
-                      }}
-                    />
-                    {/* Transparent overlay to prevent user interaction */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        backgroundColor: "transparent",
-                        zIndex: 10,
-                        cursor: "default",
-                      }}
-                    />
-                  </>
+                            // Clear time interval
+                            if (timeIntervalRef.current) {
+                              clearInterval(timeIntervalRef.current)
+                            }
+
+                            // Only close microphone when video actually ends
+                            try {
+                              await makeApiCall("http://localhost:8000/close_microphone", {
+                                method: "GET",
+                              })
+                            } catch (error) {
+                              console.log("Close microphone endpoint not available")
+                            }
+
+                            // Get final score
+                            try {
+                              const response = await makeApiCall("http://localhost:8000/final_score", {
+                                method: "GET",
+                              })
+                              setFinalScore(response.final_score)
+                            } catch (error) {
+                              console.log("Final score endpoint not available")
+                            }
+                          }, 180000) // 3 minutes for demo
+                        }}
+                      />
+                      {/* Transparent overlay to prevent user interaction */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          backgroundColor: "transparent",
+                          zIndex: 10,
+                          cursor: "default",
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <div style={styles.overlay}>
+                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                        Well done for completing the song "{songTitle}"!
+                      </p>
+                      {isScored && score > 0 && (
+                        <p style={{ fontSize: "20px", marginBottom: "10px" }}>You won {score} points!</p>
+                      )}
+                      {isScored && finalScore > 0 && (
+                        <p style={{ fontSize: "20px" }}>You were {Math.round(finalScore * 100)}% accurate!</p>
+                      )}
+                    </div>
+                  )
                 ) : (
                   <div style={styles.overlay}>
-                    <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                      Well done for completing the song "{songTitle}"!
-                    </p>
-                    {isScored && score > 0 && (
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>You won {score} points!</p>
-                    )}
-                    {isScored && finalScore > 0 && (
-                      <p style={{ fontSize: "20px" }}>You were {Math.round(finalScore * 100)}% accurate!</p>
-                    )}
-                  </div>
-                )
-              ) : (
-                <div style={styles.overlay}>
                   {videoUnavailable && (
                     <>
                       <p style={{ fontSize: "20px", marginBottom: "10px" }}>
