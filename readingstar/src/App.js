@@ -157,7 +157,7 @@ const LoadingScreen = ({ attempts, maxAttempts }) => (
           marginRight: "16px",
         }}
       >
-        ReadingStar
+        Reading Star
       </h1>
       <StarIcon />
     </div>
@@ -234,6 +234,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(-1)
   const [videoStartTime, setVideoStartTime] = useState(0)
   const [videoUnavailable, setVideoUnavailable] = useState(false)
+  const [videoLoading, setVideoLoading] = useState(false)
   const [songTitle, setSongTitle] = useState("")
   const [isFocusMode, setIsFocusMode] = useState(false)
   const [showStar, setShowStar] = useState(false)
@@ -247,7 +248,6 @@ export default function App() {
   const [isScored, setIsScored] = useState(true)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showContributionModal, setShowContributionModal] = useState(false)
-  const [animationProgress, setAnimationProgress] = useState(0)
 
   const [lyricsSettings, setLyricsSettings] = useState({
     fontSize: 32,
@@ -260,7 +260,6 @@ export default function App() {
   })
 
   const previousLyricRef = useRef("")
-  const animationRef = useRef(null)
   const timeIntervalRef = useRef(null)
 
   // Add function to check API readiness
@@ -349,13 +348,199 @@ export default function App() {
 
   const onToggleSwitch = () => setIsScored(!isScored)
 
+  const fetchTactiqTranscript = async (url) => {
+    try {
+      console.log("[Renderer] Attempting tactiq.io transcript fetch for:", url);
+      
+      const transcriptData = await window.electronAPI.fetchTactiqTranscript(url);
+      console.log("[Renderer] Received response, type:", typeof transcriptData);
+      console.log("[Renderer] Response length:", transcriptData ? transcriptData.length : 'null');
+      console.log("[Renderer] Response preview:", transcriptData ? transcriptData.substring(0, 300) : 'null');
+      console.log("[Renderer] FULL RAW TRANSCRIPT DATA:");
+      console.log('='.repeat(60));
+      console.log(transcriptData);
+      console.log('='.repeat(60));
+      
+      let lyricsArray = [];
+      
+      if (typeof transcriptData === 'string') {
+        // Try to parse as JSON first (for error responses)
+        try {
+          const jsonData = JSON.parse(transcriptData);
+          console.log("[Renderer] Parsed as JSON:", jsonData);
+          
+          // Handle error responses
+          if (jsonData.error) {
+            console.warn("[Renderer] Tactiq.io error:", jsonData.message);
+            console.log("[Renderer] Error details:", jsonData);
+            
+            if (jsonData.error === "PUPPETEER_NOT_AVAILABLE") {
+              console.log("[Renderer] Install command:", jsonData.install_command);
+            }
+            
+            setVideoUnavailable(true);
+            return false;
+          }
+          
+          // Handle tactiq.io API response format
+          if (jsonData.captions && Array.isArray(jsonData.captions)) {
+            console.log("[Renderer] Processing tactiq.io captions format...");
+            lyricsArray = jsonData.captions.map((caption) => ({
+              lyric: caption.text,
+              time: parseFloat(caption.start),
+              duration: parseFloat(caption.dur || 3) // Use dur if available, fallback to 3 seconds
+            }));
+            console.log("[Renderer] Converted", lyricsArray.length, "captions to lyrics");
+          }
+          // If it's a valid JSON response with transcript data
+          else if (Array.isArray(jsonData)) {
+            console.log("[Renderer] Processing array data...");
+            lyricsArray = jsonData.map((item, index) => ({
+              lyric: item.text || item.content || item.transcript || String(item),
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3),
+              duration: parseFloat(item.dur || item.duration || 3)
+            }));
+          } else if (jsonData.transcript && Array.isArray(jsonData.transcript)) {
+            console.log("[Renderer] Processing transcript array...");
+            lyricsArray = jsonData.transcript.map((item, index) => ({
+              lyric: item.text || item.content || String(item),
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3),
+              duration: parseFloat(item.dur || item.duration || 3)
+            }));
+          }
+          
+        } catch (parseError) {
+          console.log("[Renderer] Not JSON, processing as raw transcript text...");
+          console.log("[Renderer] Parse error:", parseError.message);
+          
+          // Process raw transcript text from browser
+          if (transcriptData.length > 100) {
+            console.log("[Renderer] Processing raw transcript, length:", transcriptData.length);
+            
+            // Enhanced Method 1: Look for timestamp patterns and properly separate them
+            console.log("[Renderer] Looking for timestamp patterns...");
+            
+            // Split by timestamp pattern and process each segment
+            const segments = transcriptData.split(/(\d{2}:\d{2}:\d{2}\.\d{3})/);
+            console.log("[Renderer] Split into", segments.length, "segments");
+            
+            for (let i = 1; i < segments.length; i += 2) {
+              const timeStr = segments[i];
+              const text = segments[i + 1];
+              
+              if (timeStr && text && text.trim().length > 5) {
+                // Convert timestamp to seconds
+                const timeParts = timeStr.split(':');
+                const hours = parseInt(timeParts[0]);
+                const minutes = parseInt(timeParts[1]);
+                const secondsAndMs = parseFloat(timeParts[2]);
+                const totalSeconds = hours * 3600 + minutes * 60 + secondsAndMs;
+                
+                // Clean the text
+                const cleanText = text.replace(/\d{2}:\d{2}:\d{2}\.\d{3}/g, '').trim();
+                
+                if (cleanText.length > 3) {
+                  console.log(`[Renderer] Segment ${i}:`, timeStr, "->", cleanText);
+                  lyricsArray.push({
+                    lyric: cleanText,
+                    time: totalSeconds,
+                    duration: 3 // Default duration
+                  });
+                }
+              }
+            }
+            
+            // Method 2: If no timestamps, split by sentences/lines
+            if (lyricsArray.length === 0) {
+              console.log("[Renderer] No timestamps found, splitting by sentences...");
+              
+              // Clean the text first
+              let cleanText = transcriptData
+                .replace(/Tactiq|YouTube Transcript Generator|Get started|Copy|Download|Privacy Policy|Terms of Service/gi, '')
+                .replace(/\d{2}:\d{2}:\d{2}\.\d{3}/g, '') // Remove any remaining timestamps
+                .replace(/\s+/g, ' ')
+                .trim();
+              
+              console.log("[Renderer] Cleaned text length:", cleanText.length);
+              console.log("[Renderer] Cleaned text preview:", cleanText.substring(0, 200));
+              
+              // Split by sentences or lines
+              const sentences = cleanText
+                .split(/[.!?]+|\n/)
+                .map(s => s.trim())
+                .filter(s => s.length > 10);
+              
+              console.log(`[Renderer] Split into ${sentences.length} sentences`);
+              
+              lyricsArray = sentences.map((sentence, index) => ({
+                lyric: sentence,
+                time: index * 3, // 3 seconds per sentence
+                duration: 3
+              }));
+              
+              console.log("[Renderer] First few sentences:", sentences.slice(0, 3));
+            }
+          }
+        }
+      }
+      
+      console.log("[Renderer] Final lyrics array length:", lyricsArray.length);
+      if (lyricsArray.length > 0) {
+        console.log("[Renderer] First few entries:", lyricsArray.slice(0, 3));
+        
+        setLyrics(lyricsArray);
+        setVideoUnavailable(false);
+        
+        // Send to backend if available
+        try {
+          await makeApiCall("http://localhost:8000/full_lyric", {
+            method: "POST",
+            body: JSON.stringify({ lyric: lyricsArray }),
+          });
+        } catch (error) {
+          console.log("Full lyric endpoint not available");
+        }
+        
+        return true;
+      } else {
+        console.warn("[Renderer] No transcript data found");
+        setVideoUnavailable(true);
+        return false;
+      }
+      
+    } catch (error) {
+      console.error("[Renderer] Error fetching tactiq transcript:", error);
+      return false;
+    }
+  };
+
+  const fetchYoutubeSubtitles = async (url) => {
+    console.log("[Renderer] Fetching subtitles using tactiq.io only...")
+    
+    try {
+      const tactiqSuccess = await fetchTactiqTranscript(url);
+      
+      if (!tactiqSuccess) {
+        console.error("[Renderer] Tactiq.io transcript fetch failed")
+        setVideoUnavailable(true)
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error("[Renderer] Error in fetchYoutubeSubtitles:", error)
+      setVideoUnavailable(true)
+      return false;
+    }
+  }
+
   const getYoutubeEmbedUrl = async (url) => {
     const videoId = url.split("v=")[1]
     const ampersandPosition = videoId ? videoId.indexOf("&") : -1
     const finalVideoId = ampersandPosition !== -1 ? videoId.substring(0, ampersandPosition) : videoId
-    setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`)
+    
     getSongTitle(url)
-    setVideoPlaying(true)
+    setVideoPlaying(false) // Don't start video immediately
+    setVideoLoading(true) // Set loading state
 
     // Reset state for new video
     setLyrics([])
@@ -364,20 +549,37 @@ export default function App() {
     setVideoUnavailable(false)
     previousLyricRef.current = ""
 
-    fetchYoutubeSubtitles(url)
-    setFinalScore(-1)
+    console.log("[Renderer] Fetching transcript first...");
+    
+    // Fetch transcript first
+    const transcriptSuccess = await fetchYoutubeSubtitles(url);
+    
+    if (transcriptSuccess) {
+      console.log("[Renderer] Transcript loaded successfully, starting video now...");
+      
+      // Start video immediately after transcript is loaded
+      console.log("[Renderer] Starting video now...");
+      setEmbedUrl(`https://www.youtube.com/embed/${finalVideoId}?autoplay=1&controls=0&encrypted-media=1&enablejsapi=1`);
+      setVideoPlaying(true);
+      setVideoLoading(false); // Clear loading state
+      
+      setFinalScore(-1);
+      const newStartTime = new Date().getTime();
+      setVideoStartTime(newStartTime);
 
-    const newStartTime = new Date().getTime()
-    setVideoStartTime(newStartTime)
+      // Start time tracking immediately
+      if (timeIntervalRef.current) {
+        clearInterval(timeIntervalRef.current);
+      }
 
-    // Start time tracking
-    if (timeIntervalRef.current) {
-      clearInterval(timeIntervalRef.current)
+      timeIntervalRef.current = setInterval(() => {
+        setCurrentTime((prev) => prev + 0.3);
+      }, 300);
+    } else {
+      console.log("[Renderer] Failed to load transcript, not starting video");
+      setVideoUnavailable(true);
+      setVideoLoading(false); // Clear loading state
     }
-
-    timeIntervalRef.current = setInterval(() => {
-      setCurrentTime((prev) => prev + 0.3)
-    }, 300)
 
     try {
       await makeApiCall("http://localhost:8000/close_microphone", {
@@ -473,191 +675,14 @@ export default function App() {
     }
   }
 
-  const fetchYoutubeSubtitles = async (url) => {
-    const maxRetries = 8
-    const baseDelay = 1000 // 1 second base delay
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        console.log(`[Renderer] Subtitle fetch attempt ${attempt + 1}/${maxRetries}`)
-
-        // Use Electron API to bypass CORS - but with simple approach like React Native
-        const html = await window.electronAPI.fetchYouTubeHTML(url)
-        console.log("[Renderer] Received HTML, length:", html.length)
-
-        const timedTextIndex = html.indexOf("timedtext")
-
-        if (timedTextIndex !== -1) {
-          const startIndex = html.lastIndexOf('"', timedTextIndex) + 1
-          const endIndex = html.indexOf('"', timedTextIndex)
-          let subtitleUrl = html.substring(startIndex, endIndex)
-
-          subtitleUrl = subtitleUrl.replace(/\\u0026/g, "&")
-          console.log("[Renderer] Decoded subtitle URL:", subtitleUrl)
-
-          // Use the same language handling as the working React Native app
-          const langIndex = subtitleUrl.indexOf("&lang=")
-          if (langIndex === -1) {
-            // No language parameter, add it
-            subtitleUrl += "&lang=en"
-            console.log("[Renderer] Added English language parameter:", subtitleUrl)
-          } else {
-            // Check if not already English
-            const langStart = langIndex + 6
-            const langEnd = subtitleUrl.indexOf("&", langStart)
-            const currentLang =
-              langEnd === -1
-                ? subtitleUrl.substring(langStart)
-                : subtitleUrl.substring(langStart, langEnd)
-
-            if (currentLang !== "en") {
-              const prefix = subtitleUrl.substring(0, langStart)
-              const suffix = langEnd === -1 ? "" : subtitleUrl.substring(langEnd)
-              subtitleUrl = prefix + "en" + suffix
-              console.log("[Renderer] Changed language to English:", subtitleUrl)
-            } else {
-              console.log("[Renderer] Already English, using URL as-is")
-            }
-          }
-
-          try {
-            console.log("[Renderer] Fetching subtitles...")
-            // Use Electron API for subtitle fetch - simple like React Native
-            const subtitleText = await window.electronAPI.fetchSubtitleXML(subtitleUrl)
-
-            console.log("[Renderer] Successfully fetched subtitles, response length:", subtitleText.length)
-
-            // Check if we got valid XML content
-            if (!subtitleText || subtitleText.length === 0) {
-              console.warn(`[Renderer] Empty subtitle response on attempt ${attempt + 1}`)
-              throw new Error("Empty subtitle response")
-            }
-
-            console.log("[Renderer] Subtitle XML first 200 chars:", subtitleText.substring(0, 200))
-
-            // Parse XML using DOMParser (keeping existing parsing logic)
-            const parser = new DOMParser()
-            const xmlDoc = parser.parseFromString(subtitleText, "text/xml")
-
-            // Check for parsing errors
-            const parseError = xmlDoc.getElementsByTagName("parsererror")
-            if (parseError.length > 0) {
-              console.error("[Renderer] XML parsing error:", parseError[0].textContent)
-              console.error("[Renderer] Raw subtitle text that failed to parse:", subtitleText)
-              throw new Error("XML parsing failed")
-            }
-
-            const textElements = xmlDoc.getElementsByTagName("text")
-            console.log("[Renderer] Found text elements:", textElements.length)
-
-            if (textElements.length === 0) {
-              console.warn(`[Renderer] No text elements found on attempt ${attempt + 1}`)
-              throw new Error("No text elements found in subtitle XML")
-            }
-
-            const lyricsArray = Array.from(textElements).map((item, index) => {
-              const lyric = item.textContent
-                ?.replace(/&amp;/g, "&")
-                .replace(/&lt;/g, "<")
-                .replace(/&gt;/g, ">")
-                .replace(/&#39;/g, "'")
-                .replace(/&quot;/g, '"') || ""
-              const time = Number.parseFloat(item.getAttribute("start") || "0")
-
-              if (index < 5) {
-                // Log first 5 entries for debugging
-                console.log(`[Renderer] Lyric ${index}:`, { lyric, time })
-              }
-
-              return { lyric, time }
-            })
-
-            console.log("[Renderer] Processed lyrics array, length:", lyricsArray.length)
-
-            setLyrics(lyricsArray)
-            setVideoUnavailable(false) // Reset unavailable flag on success
-
-            if (lyricsArray.length > 0) {
-              try {
-                await makeApiCall("http://localhost:8000/full_lyric", {
-                  method: "POST",
-                  body: JSON.stringify({ lyric: lyricsArray }),
-                })
-              } catch (error) {
-                console.log("Full lyric endpoint not available")
-              }
-            }
-
-            // If we reach here, the fetch was successful, so return
-            console.log(`[Renderer] Successfully fetched subtitles on attempt ${attempt + 1}`)
-            return
-          } catch (error) {
-            console.warn(`[Renderer] Subtitle fetch failed on attempt ${attempt + 1}:`, error.message)
-
-            // If this was the last attempt, set video unavailable
-            if (attempt === maxRetries - 1) {
-              console.error("[Renderer] All subtitle fetch attempts failed")
-              setVideoUnavailable(true)
-              return
-            }
-
-            // Calculate delay with exponential backoff
-            const delay = baseDelay * Math.pow(2, attempt)
-            console.log(`[Renderer] Retrying in ${delay}ms...`)
-
-            // Wait before retrying
-            await new Promise((resolve) => setTimeout(resolve, delay))
-            continue // Try again
-          }
-        } else {
-          console.warn(`[Renderer] No timedtext found in HTML on attempt ${attempt + 1}`)
-
-          if (attempt === maxRetries - 1) {
-            console.log(
-              "[Renderer] HTML snippet around potential subtitle area:",
-              html.substring(
-                Math.max(0, html.indexOf("captionTracks") - 100),
-                html.indexOf("captionTracks") + 500
-              )
-            )
-            setVideoUnavailable(true)
-            return
-          }
-
-          // Wait before retrying
-          const delay = baseDelay * Math.pow(2, attempt)
-          console.log(`[Renderer] Retrying in ${delay}ms...`)
-          await new Promise((resolve) => setTimeout(resolve, delay))
-        }
-      } catch (error) {
-        console.error(`[Renderer] Error in fetchYoutubeSubtitles attempt ${attempt + 1}:`, error)
-
-        if (attempt === maxRetries - 1) {
-          console.error("[Renderer] All attempts failed, error stack:", error.stack)
-          setVideoUnavailable(true)
-          return
-        }
-
-        // Wait before retrying
-        const delay = baseDelay * Math.pow(2, attempt)
-        console.log(`[Renderer] Retrying in ${delay}ms...`)
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
-    }
-  }
-
   const getSongTitle = async (url) => {
     try {
       let title = findFromPlaylist(url).name ?? ""
       if (!title) {
-        // Use Electron API to bypass CORS
-        const html = await window.electronAPI.fetchYouTubeHTML(url)
-        const titleIndex = html.indexOf("<title>")
-        const titleEndIndex = html.indexOf("</title>")
-        title = html.substring(titleIndex + 7, titleEndIndex)
-        if (title.includes("YouTube")) {
-          title = title.substring(0, title.indexOf(" - YouTube"))
-        }
+        // Extract title from URL or use fallback
+        const videoId = url.split("v=")[1]?.split("&")[0]
+        title = `Video ${videoId || 'Unknown'}`
+
         const songItem = { id: playlist.length, name: title, url: url }
         const newPlaylist = [...playlist, songItem]
         setPlaylist(newPlaylist)
@@ -701,50 +726,16 @@ export default function App() {
     setDifficulty(difficulty)
   }
 
-  // Animation effect for lyrics
-  useEffect(() => {
-    if (currentLyric) {
-      const currentIndex = lyrics.findIndex((lyric) => lyric.lyric === currentLyric)
-      const nextLyric = lyrics[currentIndex + 1]
-      const duration = nextLyric ? (nextLyric.time - lyrics[currentIndex].time) * 1000 : 2000
-
-      setAnimationProgress(0)
-      const startTime = Date.now()
-
-      const animate = () => {
-        const elapsed = Date.now() - startTime
-        const progress = Math.min(elapsed / duration, 1)
-        setAnimationProgress(progress)
-
-        if (progress < 1) {
-          animationRef.current = requestAnimationFrame(animate)
-        } else {
-          setAnimationProgress(0) // Reset when complete
-        }
-      }
-
-      animationRef.current = requestAnimationFrame(animate)
-
-      return () => {
-        if (animationRef.current) {
-          cancelAnimationFrame(animationRef.current)
-        }
-      }
-    }
-  }, [currentLyric, lyrics])
-
   useEffect(() => {
     if (currentTime > 0 && lyrics.length > 0) {
       const elapsedTime = currentTime
 
-      // Find the current lyric based on elapsed time with proper safety checks
-      const currentLyricObj = lyrics.reduce((prev, curr) => {
-        // Safety check: ensure both prev and curr exist and have time property
-        if (!prev || !curr || typeof curr.time !== "number") {
-          return prev || { lyric: "", time: 0 }
-        }
-        return curr.time <= elapsedTime ? curr : prev
-      }, { lyric: "", time: 0 })
+      // Find the current lyric by sorting and picking the highest start time that's <= currentTime
+      const validLyrics = lyrics
+        .filter(lyric => lyric && typeof lyric.time === "number" && lyric.time <= elapsedTime)
+        .sort((a, b) => b.time - a.time) // Sort by time descending
+      
+      const currentLyricObj = validLyrics[0] || { lyric: "", time: 0 } // Get the most recent lyric
 
       // Safety check: ensure currentLyricObj exists and has lyric property
       const currentLyricText = currentLyricObj?.lyric || ""
@@ -773,11 +764,17 @@ export default function App() {
 
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Only handle visibility changes if the API is ready and app is loaded
+      if (!isApiReady || !apiAvailable) {
+        console.log("Skipping visibility change handling - API not ready yet");
+        return;
+      }
+
       if (document.hidden) {
-        // Clear time interval when app goes to background
-        if (timeIntervalRef.current) {
-          clearInterval(timeIntervalRef.current)
-        }
+        // Remove timer stopping - let it continue running
+        // if (timeIntervalRef.current) {
+        //   clearInterval(timeIntervalRef.current)
+        // }
 
         try {
           makeApiCall("http://localhost:8000/close_microphone", {
@@ -789,18 +786,18 @@ export default function App() {
       }
     }
 
-    document.addEventListener("visibilitychange", handleVisibilityChange)
+    // Only add the event listener if the API is ready
+    if (isApiReady) {
+      document.addEventListener("visibilitychange", handleVisibilityChange)
+    }
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange)
       if (timeIntervalRef.current) {
         clearInterval(timeIntervalRef.current)
       }
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
     }
-  }, [])
+  }, [isApiReady, apiAvailable]) // Add dependencies to re-run when API status changes
 
   const removeBracketedText = (lyric) => {
     if (lyric.includes("[") && lyric.includes("]")) {
@@ -1112,25 +1109,11 @@ export default function App() {
     },
     starContainer: {
       position: "absolute",
-      top: "50%",
+      top: "82%",
       left: "50%",
-      transform: "translate(-50%, -50%)",
       zIndex: 10,
-      width: "100px",
-      height: "100px",
-    },
-    slidingBarContainer: {
-      width: "100%",
-      maxWidth: "500px",
-      height: "5px",
-      backgroundColor: "transparent",
-      overflow: "hidden",
-      position: "relative",
-    },
-    slidingBar: {
-      height: "5px",
-      backgroundColor: "#FFD700",
-      transition: "width 0.1s ease-out",
+      width: "500px",
+      height: "500px",
     },
     iconButton: {
       padding: "8px",
@@ -1904,233 +1887,243 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content */}
-      <div style={styles.content}>
-        {/* Sidebar */}
-        {!isFocusMode && (
-          <div style={styles.sidebar}>
-            <h2 style={styles.playlistTitle}>{playlistName}</h2>
-            <div
-              style={{
-                maxHeight: "400px",
-                overflowY: "auto",
-              }}
-            >
-              {playlistLoaded && playlist ? (
-                playlist.length > 0 ? (
-                  playlist.map((song) => (
-                    <div
-                      key={song.id}
-                      style={{
-                        ...styles.playlistItem,
-                        ...(song.name === selectedSong ? styles.playlistItemSelected : {}),
-                      }}
-                      onClick={() => playFromCurrentPlaylist(song.name)}
-                    >
-                      <span
+        {/* Main Content */}
+        <div style={styles.content}>
+          {/* Sidebar */}
+          {!isFocusMode && (
+            <div style={styles.sidebar}>
+              <h2 style={styles.playlistTitle}>{playlistName}</h2>
+              <div
+                style={{
+                  maxHeight: "400px",
+                  overflowY: "auto",
+                }}
+              >
+                {playlistLoaded && playlist ? (
+                  playlist.length > 0 ? (
+                    playlist.map((song) => (
+                      <div
+                        key={song.id}
                         style={{
-                          ...styles.playlistItemText,
-                          ...(song.name === selectedSong ? styles.playlistItemTextSelected : {}),
+                          ...styles.playlistItem,
+                          ...(song.name === selectedSong ? styles.playlistItemSelected : {}),
                         }}
+                        onClick={() => playFromCurrentPlaylist(song.name)}
                       >
-                        {song.name}
-                      </span>
-                      <button
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: "4px",
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          removePlaylistJson(playlistName, song.name)
-                        }}
-                      >
-                        <DeleteIcon />
-                      </button>
-                    </div>
-                  ))
+                        <span
+                          style={{
+                            ...styles.playlistItemText,
+                            ...(song.name === selectedSong ? styles.playlistItemTextSelected : {}),
+                          }}
+                        >
+                          {song.name}
+                        </span>
+                        <button
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: "4px",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removePlaylistJson(playlistName, song.name)
+                          }}
+                        >
+                          <DeleteIcon />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={styles.playlistSubtitle}>Add some songs...</p>
+                  )
                 ) : (
-                  <p style={styles.playlistSubtitle}>Add some songs...</p>
-                )
-              ) : (
-                <p>Playlist empty.</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Main Content Area */}
-        <div
-          style={{
-            ...styles.mainContent,
-            ...(isFocusMode ? styles.mainContentFocus : {}),
-          }}
-        >
-          {/* Focus Mode Background */}
-          {isFocusMode && (
-            <div style={styles.fullscreenBackground}>
-              {lyricsSettings.background === "black" ? (
-                <div
-                  style={{
-                    ...styles.solidBackground,
-                    backgroundColor: "#000000",
-                  }}
-                />
-              ) : lyricsSettings.background === "white" ? (
-                <div
-                  style={{
-                    ...styles.solidBackground,
-                    backgroundColor: "#FFFFFF",
-                  }}
-                />
-              ) : (
-                <img
-                  src={backgroundImages[lyricsSettings.background]}
-                  alt="Background"
-                  style={styles.backgroundImage}
-                />
-              )}
+                  <p>Playlist empty.</p>
+                )}
+              </div>
             </div>
           )}
 
+          {/* Main Content Area */}
           <div
             style={{
-              ...styles.contentOverlay,
-              ...(isFocusMode ? styles.contentOverlayFocus : {}),
+              ...styles.mainContent,
+              ...(isFocusMode ? styles.mainContentFocus : {}),
             }}
           >
-            {/* Score Container */}
-            {isScored && (
-              <div
-                style={{
-                  ...styles.scoreContainer,
-                  ...(isFocusMode ? styles.scoreContainerFocus : {}),
-                }}
-              >
-                <span style={styles.scoreText}>Score: {score}</span>
+            {/* Focus Mode Background */}
+            {isFocusMode && (
+              <div style={styles.fullscreenBackground}>
+                {lyricsSettings.background === "black" ? (
+                  <div
+                    style={{
+                      ...styles.solidBackground,
+                      backgroundColor: "#000000",
+                    }}
+                  />
+                ) : lyricsSettings.background === "white" ? (
+                  <div
+                    style={{
+                      ...styles.solidBackground,
+                      backgroundColor: "#FFFFFF",
+                    }}
+                  />
+                ) : (
+                  <img
+                    src={backgroundImages[lyricsSettings.background]}
+                    alt="Background"
+                    style={styles.backgroundImage}
+                  />
+                )}
               </div>
             )}
 
-            {/* URL Input */}
-            {!isFocusMode && (
-              <div style={styles.inputContainer}>
-                <input
-                  type="text"
-                  value={inputUrl}
-                  onChange={(e) => setInputUrl(e.target.value)}
-                  placeholder="Enter YouTube URL"
-                  style={styles.textInput}
-                />
-                <button
-                  style={styles.goButton}
-                  onClick={() => {
-                    if (inputUrl.length > 0 && inputUrl.includes("youtube.com")) {
-                      let url = inputUrl
-                      if (url.includes("&")) {
-                        url = url.split("&")[0]
-                      }
-                      setYoutubeUrl(url)
-                      getYoutubeEmbedUrl(url)
-                      setInputUrl("")
-                    }
-                  }}
-                >
-                  Go
-                </button>
-              </div>
-            )}
-
-            {/* Video Container */}
             <div
               style={{
-                ...styles.videoContainer,
-                ...(isFocusMode ? styles.videoContainerFocus : {}),
+                ...styles.contentOverlay,
+                ...(isFocusMode ? styles.contentOverlayFocus : {}),
               }}
             >
-              {youtubeUrl ? (
-                videoPlaying ? (
-                  <>
-                    <iframe
-                      src={embedUrl}
-                      style={styles.iframe}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      onLoad={() => {
-                        // Check for video end after reasonable time
-                        setTimeout(async () => {
-                          setVideoPlaying(false)
-
-                          // Clear time interval
-                          if (timeIntervalRef.current) {
-                            clearInterval(timeIntervalRef.current)
-                          }
-
-                          // Only close microphone when video actually ends
-                          try {
-                            await makeApiCall("http://localhost:8000/close_microphone", {
-                              method: "GET",
-                            })
-                          } catch (error) {
-                            console.log("Close microphone endpoint not available")
-                          }
-
-                          // Get final score
-                          try {
-                            const response = await makeApiCall("http://localhost:8000/final_score", {
-                              method: "GET",
-                            })
-                            setFinalScore(response.final_score)
-                          } catch (error) {
-                            console.log("Final score endpoint not available")
-                          }
-                        }, 180000) // 3 minutes for demo
-                      }}
-                    />
-                    {/* Transparent overlay to prevent user interaction */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        backgroundColor: "transparent",
-                        zIndex: 10,
-                        cursor: "default",
-                      }}
-                    />
-                  </>
-                ) : (
-                  <div style={styles.overlay}>
-                    <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                      Well done for completing the song "{songTitle}"!
-                    </p>
-                    {isScored && score > 0 && (
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>You won {score} points!</p>
-                    )}
-                    {isScored && finalScore > 0 && (
-                      <p style={{ fontSize: "20px" }}>You were {Math.round(finalScore * 100)}% accurate!</p>
-                    )}
-                  </div>
-                )
-              ) : (
-                <div style={styles.overlay}>
-                  {videoUnavailable && (
-                    <>
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                        Unfortunately, this video could not be loaded, or had no captions.
-                      </p>
-                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
-                        Use another song or Youtube link to try again.
-                      </p>
-                    </>
-                  )}
-                  <p style={{ fontSize: "20px" }}>Click the sidebar or enter a YouTube link to play a song!</p>
+              {/* Score Container */}
+              {isScored && (
+                <div
+                  style={{
+                    ...styles.scoreContainer,
+                    ...(isFocusMode ? styles.scoreContainerFocus : {}),
+                  }}
+                >
+                  <span style={styles.scoreText}>Score: {score}</span>
                 </div>
               )}
-            </div>
+
+              {/* URL Input */}
+              {!isFocusMode && (
+                <div style={styles.inputContainer}>
+                  <input
+                    type="text"
+                    value={inputUrl}
+                    onChange={(e) => setInputUrl(e.target.value)}
+                    placeholder="Enter YouTube URL"
+                    style={styles.textInput}
+                  />
+                  <button
+                    style={styles.goButton}
+                    onClick={() => {
+                      if (inputUrl.length > 0 && inputUrl.includes("youtube.com")) {
+                        let url = inputUrl
+                        if (url.includes("&")) {
+                          url = url.split("&")[0]
+                        }
+                        setYoutubeUrl(url)
+                        getYoutubeEmbedUrl(url)
+                        setInputUrl("")
+                      }
+                    }}
+                  >
+                    Go
+                  </button>
+                </div>
+              )}
+
+              {/* Video Container */}
+              <div
+                style={{
+                  ...styles.videoContainer,
+                  ...(isFocusMode ? styles.videoContainerFocus : {}),
+                }}
+              >
+                {youtubeUrl ? (
+                  videoPlaying ? (
+                    <>
+                      <iframe
+                        src={embedUrl}
+                        style={styles.iframe}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        onLoad={() => {
+                          // Check for video end after reasonable time
+                          setTimeout(async () => {
+                            setVideoPlaying(false)
+
+                            // Clear time interval
+                            if (timeIntervalRef.current) {
+                              clearInterval(timeIntervalRef.current)
+                            }
+
+                            // Only close microphone when video actually ends
+                            try {
+                              await makeApiCall("http://localhost:8000/close_microphone", {
+                                method: "GET",
+                              })
+                            } catch (error) {
+                              console.log("Close microphone endpoint not available")
+                            }
+
+                            // Get final score
+                            try {
+                              const response = await makeApiCall("http://localhost:8000/final_score", {
+                                method: "GET",
+                              })
+                              setFinalScore(response.final_score)
+                            } catch (error) {
+                              console.log("Final score endpoint not available")
+                            }
+                          }, 180000) // 3 minutes for demo
+                        }}
+                      />
+                      {/* Transparent overlay to prevent user interaction */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          backgroundColor: "transparent",
+                          zIndex: 10,
+                          cursor: "default",
+                        }}
+                      />
+                    </>
+                  ) : videoLoading ? (
+                    <div style={styles.overlay}>
+                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                        Video Loading...
+                      </p>
+                      <p style={{ fontSize: "16px", color: "#ccc" }}>
+                        We're processing the lyrics and preparing everything for you!
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={styles.overlay}>
+                      <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                        Well done for completing the song "{songTitle}"!
+                      </p>
+                      {isScored && score > 0 && (
+                        <p style={{ fontSize: "20px", marginBottom: "10px" }}>You won {score} points!</p>
+                      )}
+                      {isScored && finalScore > 0 && (
+                        <p style={{ fontSize: "20px" }}>You were {Math.round(finalScore * 100)}% accurate!</p>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  <div style={styles.overlay}>
+                    {videoUnavailable ? (
+                      <>
+                        <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                          Unfortunately, this video could not be loaded, or had no captions.
+                        </p>
+                        <p style={{ fontSize: "20px", marginBottom: "10px" }}>
+                          Use another song or Youtube link to try again.
+                        </p>
+                      </>
+                    ) : (
+                      <p style={{ fontSize: "20px" }}>Click the sidebar or enter a YouTube link to play a song!</p>
+                    )}
+                  </div>
+                )}
+              </div>
 
             {/* Lyrics Container */}
             <div
@@ -2153,14 +2146,7 @@ export default function App() {
               >
                 {removeBracketedText(currentLyric)}
               </p>
-              <div style={styles.slidingBarContainer}>
-                <div
-                  style={{
-                    ...styles.slidingBar,
-                    width: `${animationProgress * 100}%`,
-                  }}
-                />
-              </div>
+
             </div>
           </div>
         </div>

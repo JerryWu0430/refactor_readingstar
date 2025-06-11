@@ -1,7 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose simplified API that matches React Native approach
+// Expose simplified API - only tactiq.io now
 contextBridge.exposeInMainWorld('electronAPI', {
-  fetchYouTubeHTML: (url) => ipcRenderer.invoke('fetch-youtube-html', url),
-  fetchSubtitleXML: (url) => ipcRenderer.invoke('fetch-subtitle-xml', url)
+  fetchTactiqTranscript: (url) => ipcRenderer.invoke('fetch-tactiq-transcript', url)
 });
