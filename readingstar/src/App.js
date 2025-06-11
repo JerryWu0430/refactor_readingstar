@@ -1099,8 +1099,8 @@ export default function App() {
       fontWeight: "bold",
     },
     starContainer: {
-      position: "relative",
-      top: "70%",
+      position: "absolute",
+      top: "80%",
       left: "47%",
       transform: "translate(-50%, -50%)",
       zIndex: 10,
