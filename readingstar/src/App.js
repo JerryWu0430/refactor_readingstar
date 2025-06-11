@@ -473,176 +473,165 @@ export default function App() {
     }
   }
 
-  const fetchYoutubeSubtitles = async (url) => {
-    const maxRetries = 8
-    const baseDelay = 1000 // 1 second base delay
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        console.log(`[Renderer] Subtitle fetch attempt ${attempt + 1}/${maxRetries}`)
-
-        // Use Electron API to bypass CORS - but with simple approach like React Native
-        const html = await window.electronAPI.fetchYouTubeHTML(url)
-        console.log("[Renderer] Received HTML, length:", html.length)
-
-        const timedTextIndex = html.indexOf("timedtext")
-
-        if (timedTextIndex !== -1) {
-          const startIndex = html.lastIndexOf('"', timedTextIndex) + 1
-          const endIndex = html.indexOf('"', timedTextIndex)
-          let subtitleUrl = html.substring(startIndex, endIndex)
-
-          subtitleUrl = subtitleUrl.replace(/\\u0026/g, "&")
-          console.log("[Renderer] Decoded subtitle URL:", subtitleUrl)
-
-          // Use the same language handling as the working React Native app
-          const langIndex = subtitleUrl.indexOf("&lang=")
-          if (langIndex === -1) {
-            // No language parameter, add it
-            subtitleUrl += "&lang=en"
-            console.log("[Renderer] Added English language parameter:", subtitleUrl)
-          } else {
-            // Check if not already English
-            const langStart = langIndex + 6
-            const langEnd = subtitleUrl.indexOf("&", langStart)
-            const currentLang =
-              langEnd === -1
-                ? subtitleUrl.substring(langStart)
-                : subtitleUrl.substring(langStart, langEnd)
-
-            if (currentLang !== "en") {
-              const prefix = subtitleUrl.substring(0, langStart)
-              const suffix = langEnd === -1 ? "" : subtitleUrl.substring(langEnd)
-              subtitleUrl = prefix + "en" + suffix
-              console.log("[Renderer] Changed language to English:", subtitleUrl)
-            } else {
-              console.log("[Renderer] Already English, using URL as-is")
+  const fetchTactiqTranscript = async (url) => {
+    try {
+      console.log("[Renderer] Attempting tactiq.io transcript fetch for:", url);
+      
+      const transcriptData = await window.electronAPI.fetchTactiqTranscript(url);
+      console.log("[Renderer] Received response, type:", typeof transcriptData);
+      console.log("[Renderer] Response length:", transcriptData ? transcriptData.length : 'null');
+      console.log("[Renderer] Response preview:", transcriptData ? transcriptData.substring(0, 300) : 'null');
+      
+      let lyricsArray = [];
+      
+      if (typeof transcriptData === 'string') {
+        // Try to parse as JSON first (for error responses)
+        try {
+          const jsonData = JSON.parse(transcriptData);
+          console.log("[Renderer] Parsed as JSON:", jsonData);
+          
+          // Handle error responses
+          if (jsonData.error) {
+            console.warn("[Renderer] Tactiq.io error:", jsonData.message);
+            console.log("[Renderer] Error details:", jsonData);
+            
+            if (jsonData.error === "PUPPETEER_NOT_AVAILABLE") {
+              console.log("[Renderer] Install command:", jsonData.install_command);
             }
+            
+            setVideoUnavailable(true);
+            return false;
           }
-
-          try {
-            console.log("[Renderer] Fetching subtitles...")
-            // Use Electron API for subtitle fetch - simple like React Native
-            const subtitleText = await window.electronAPI.fetchSubtitleXML(subtitleUrl)
-
-            console.log("[Renderer] Successfully fetched subtitles, response length:", subtitleText.length)
-
-            // Check if we got valid XML content
-            if (!subtitleText || subtitleText.length === 0) {
-              console.warn(`[Renderer] Empty subtitle response on attempt ${attempt + 1}`)
-              throw new Error("Empty subtitle response")
-            }
-
-            console.log("[Renderer] Subtitle XML first 200 chars:", subtitleText.substring(0, 200))
-
-            // Parse XML using DOMParser (keeping existing parsing logic)
-            const parser = new DOMParser()
-            const xmlDoc = parser.parseFromString(subtitleText, "text/xml")
-
-            // Check for parsing errors
-            const parseError = xmlDoc.getElementsByTagName("parsererror")
-            if (parseError.length > 0) {
-              console.error("[Renderer] XML parsing error:", parseError[0].textContent)
-              console.error("[Renderer] Raw subtitle text that failed to parse:", subtitleText)
-              throw new Error("XML parsing failed")
-            }
-
-            const textElements = xmlDoc.getElementsByTagName("text")
-            console.log("[Renderer] Found text elements:", textElements.length)
-
-            if (textElements.length === 0) {
-              console.warn(`[Renderer] No text elements found on attempt ${attempt + 1}`)
-              throw new Error("No text elements found in subtitle XML")
-            }
-
-            const lyricsArray = Array.from(textElements).map((item, index) => {
-              const lyric = item.textContent
-                ?.replace(/&amp;/g, "&")
-                .replace(/&lt;/g, "<")
-                .replace(/&gt;/g, ">")
-                .replace(/&#39;/g, "'")
-                .replace(/&quot;/g, '"') || ""
-              const time = Number.parseFloat(item.getAttribute("start") || "0")
-
-              if (index < 5) {
-                // Log first 5 entries for debugging
-                console.log(`[Renderer] Lyric ${index}:`, { lyric, time })
-              }
-
-              return { lyric, time }
-            })
-
-            console.log("[Renderer] Processed lyrics array, length:", lyricsArray.length)
-
-            setLyrics(lyricsArray)
-            setVideoUnavailable(false) // Reset unavailable flag on success
-
-            if (lyricsArray.length > 0) {
-              try {
-                await makeApiCall("http://localhost:8000/full_lyric", {
-                  method: "POST",
-                  body: JSON.stringify({ lyric: lyricsArray }),
-                })
-              } catch (error) {
-                console.log("Full lyric endpoint not available")
+          
+          // If it's a valid JSON response with transcript data
+          if (Array.isArray(jsonData)) {
+            console.log("[Renderer] Processing array data...");
+            lyricsArray = jsonData.map((item, index) => ({
+              lyric: item.text || item.content || item.transcript || String(item),
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
+            }));
+          } else if (jsonData.transcript && Array.isArray(jsonData.transcript)) {
+            console.log("[Renderer] Processing transcript array...");
+            lyricsArray = jsonData.transcript.map((item, index) => ({
+              lyric: item.text || item.content || String(item),
+              time: parseFloat(item.start || item.time || item.timestamp || index * 3)
+            }));
+          }
+          
+        } catch (parseError) {
+          console.log("[Renderer] Not JSON, processing as raw transcript text...");
+          console.log("[Renderer] Parse error:", parseError.message);
+          
+          // Process raw transcript text from browser
+          if (transcriptData.length > 100) {
+            console.log("[Renderer] Processing raw transcript, length:", transcriptData.length);
+            
+            // Method 1: Look for timestamp patterns first
+            console.log("[Renderer] Looking for timestamp patterns...");
+            const timePattern = /(\d{1,2}:\d{2}(?::\d{2})?)\s+([^\n\r]+)/g;
+            let match;
+            let timeMatches = 0;
+            
+            while ((match = timePattern.exec(transcriptData)) !== null) {
+              const timeStr = match[1];
+              const text = match[2].trim();
+              timeMatches++;
+              
+              if (text.length > 5) {
+                console.log(`[Renderer] Found timestamped text ${timeMatches}:`, timeStr, "->", text.substring(0, 50));
+                
+                const timeParts = timeStr.split(':').map(Number);
+                let seconds = 0;
+                if (timeParts.length === 3) {
+                  seconds = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2];
+                } else if (timeParts.length === 2) {
+                  seconds = timeParts[0] * 60 + timeParts[1];
+                }
+                
+                lyricsArray.push({
+                  lyric: text,
+                  time: seconds
+                });
               }
             }
-
-            // If we reach here, the fetch was successful, so return
-            console.log(`[Renderer] Successfully fetched subtitles on attempt ${attempt + 1}`)
-            return
-          } catch (error) {
-            console.warn(`[Renderer] Subtitle fetch failed on attempt ${attempt + 1}:`, error.message)
-
-            // If this was the last attempt, set video unavailable
-            if (attempt === maxRetries - 1) {
-              console.error("[Renderer] All subtitle fetch attempts failed")
-              setVideoUnavailable(true)
-              return
+            
+            console.log(`[Renderer] Found ${timeMatches} timestamp matches, extracted ${lyricsArray.length} lyrics`);
+            
+            // Method 2: If no timestamps, split by sentences/lines
+            if (lyricsArray.length === 0) {
+              console.log("[Renderer] No timestamps found, splitting by sentences...");
+              
+              // Clean the text first
+              let cleanText = transcriptData
+                .replace(/Tactiq|YouTube Transcript Generator|Get started|Copy|Download|Privacy Policy|Terms of Service/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+              
+              console.log("[Renderer] Cleaned text length:", cleanText.length);
+              console.log("[Renderer] Cleaned text preview:", cleanText.substring(0, 200));
+              
+              // Split by sentences or lines
+              const sentences = cleanText
+                .split(/[.!?]+|\n/)
+                .map(s => s.trim())
+                .filter(s => s.length > 10);
+              
+              console.log(`[Renderer] Split into ${sentences.length} sentences`);
+              
+              lyricsArray = sentences.map((sentence, index) => ({
+                lyric: sentence,
+                time: index * 3 // 3 seconds per sentence
+              }));
+              
+              console.log("[Renderer] First few sentences:", sentences.slice(0, 3));
             }
-
-            // Calculate delay with exponential backoff
-            const delay = baseDelay * Math.pow(2, attempt)
-            console.log(`[Renderer] Retrying in ${delay}ms...`)
-
-            // Wait before retrying
-            await new Promise((resolve) => setTimeout(resolve, delay))
-            continue // Try again
           }
-        } else {
-          console.warn(`[Renderer] No timedtext found in HTML on attempt ${attempt + 1}`)
-
-          if (attempt === maxRetries - 1) {
-            console.log(
-              "[Renderer] HTML snippet around potential subtitle area:",
-              html.substring(
-                Math.max(0, html.indexOf("captionTracks") - 100),
-                html.indexOf("captionTracks") + 500
-              )
-            )
-            setVideoUnavailable(true)
-            return
-          }
-
-          // Wait before retrying
-          const delay = baseDelay * Math.pow(2, attempt)
-          console.log(`[Renderer] Retrying in ${delay}ms...`)
-          await new Promise((resolve) => setTimeout(resolve, delay))
         }
-      } catch (error) {
-        console.error(`[Renderer] Error in fetchYoutubeSubtitles attempt ${attempt + 1}:`, error)
-
-        if (attempt === maxRetries - 1) {
-          console.error("[Renderer] All attempts failed, error stack:", error.stack)
-          setVideoUnavailable(true)
-          return
-        }
-
-        // Wait before retrying
-        const delay = baseDelay * Math.pow(2, attempt)
-        console.log(`[Renderer] Retrying in ${delay}ms...`)
-        await new Promise((resolve) => setTimeout(resolve, delay))
       }
+      
+      console.log("[Renderer] Final lyrics array length:", lyricsArray.length);
+      if (lyricsArray.length > 0) {
+        console.log("[Renderer] First few entries:", lyricsArray.slice(0, 3));
+        
+        setLyrics(lyricsArray);
+        setVideoUnavailable(false);
+        
+        // Send to backend if available
+        try {
+          await makeApiCall("http://localhost:8000/full_lyric", {
+            method: "POST",
+            body: JSON.stringify({ lyric: lyricsArray }),
+          });
+        } catch (error) {
+          console.log("Full lyric endpoint not available");
+        }
+        
+        return true;
+      } else {
+        console.warn("[Renderer] No transcript data found");
+        setVideoUnavailable(true);
+        return false;
+      }
+      
+    } catch (error) {
+      console.error("[Renderer] Error fetching tactiq transcript:", error);
+      return false;
+    }
+  };
+
+  const fetchYoutubeSubtitles = async (url) => {
+    console.log("[Renderer] Fetching subtitles using tactiq.io only...")
+    
+    try {
+      const tactiqSuccess = await fetchTactiqTranscript(url);
+      
+      if (!tactiqSuccess) {
+        console.error("[Renderer] Tactiq.io transcript fetch failed")
+        setVideoUnavailable(true)
+      }
+    } catch (error) {
+      console.error("[Renderer] Error in fetchYoutubeSubtitles:", error)
+      setVideoUnavailable(true)
     }
   }
 
@@ -650,14 +639,10 @@ export default function App() {
     try {
       let title = findFromPlaylist(url).name ?? ""
       if (!title) {
-        // Use Electron API to bypass CORS
-        const html = await window.electronAPI.fetchYouTubeHTML(url)
-        const titleIndex = html.indexOf("<title>")
-        const titleEndIndex = html.indexOf("</title>")
-        title = html.substring(titleIndex + 7, titleEndIndex)
-        if (title.includes("YouTube")) {
-          title = title.substring(0, title.indexOf(" - YouTube"))
-        }
+        // Extract title from URL or use fallback
+        const videoId = url.split("v=")[1]?.split("&")[0]
+        title = `Video ${videoId || 'Unknown'}`
+        
         const songItem = { id: playlist.length, name: title, url: url }
         const newPlaylist = [...playlist, songItem]
         setPlaylist(newPlaylist)
